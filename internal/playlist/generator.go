@@ -64,8 +64,15 @@ func (lp *LivePlaylist) Generate() string {
 	// Get current window of segments
 	windowSegments := lp.getCurrentWindow()
 
-	// Write segments
-	for _, seg := range windowSegments {
+	// Write segments with discontinuity detection
+	for i, seg := range windowSegments {
+		// Check for discontinuity (loop point)
+		// If this segment's sequence is less than the previous segment's,
+		// we've wrapped around to the beginning
+		if i > 0 && seg.Sequence < windowSegments[i-1].Sequence {
+			b.WriteString("#EXT-X-DISCONTINUITY\n")
+		}
+
 		b.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", seg.Duration))
 		b.WriteString(seg.URL)
 		b.WriteString("\n")
