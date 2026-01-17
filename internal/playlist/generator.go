@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/agleyzer/encodersim/pkg/segment"
+	"github.com/agleyzer/encodersim/internal/segment"
 )
 
 // LivePlaylist manages a sliding window over a list of segments

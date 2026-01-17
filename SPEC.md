@@ -4,9 +4,12 @@
 
 EncoderSim is a Go command-line tool that converts static HLS (HTTP Live Streaming) playlists into continuously looping live HLS feeds. The tool manipulates only the HLS manifest files (m3u8) without downloading or caching video segments, presenting a sliding window of segments that loops infinitely.
 
+**Project Type:** CLI Application (not a library)
 **Version:** 1.0.0
 **Language:** Go 1.21+
 **License:** MIT
+
+**Note:** EncoderSim is designed as a standalone executable binary. It is **not intended to be imported as a library** by other Go projects. All packages are private (under `internal/`) and cannot be imported externally, which is enforced by the Go compiler.
 
 ## Project Goals
 
@@ -265,22 +268,29 @@ encodersim --port 8080 --window-size 6 https://example.com/playlist.m3u8
 
 ### Code Organization
 
+**IMPORTANT:** EncoderSim is a **CLI tool**, not a library. It is designed to be executed as a standalone binary, not imported by other Go projects. Therefore, **all packages are private** and placed under `internal/`.
+
 **MUST:**
-- Follow standard Go project layout:
+- Follow standard Go project layout for CLI tools:
   ```
   encodersim/
-  ├── cmd/encodersim/         # Main application
-  ├── internal/               # Private packages
+  ├── cmd/encodersim/         # Main application entry point
+  ├── internal/               # All private packages (CLI tools only)
   │   ├── parser/            # HLS parsing
   │   ├── playlist/          # Live playlist generation
+  │   ├── segment/           # Segment data structures
   │   └── server/            # HTTP server
-  ├── pkg/                   # Public packages
-  │   └── segment/           # Segment data structures
   └── test/                  # Test resources
   ```
-- Use `internal/` for private packages (enforced by Go compiler)
-- Use `pkg/` for potentially reusable packages
+- Use `internal/` for ALL packages (enforced by Go compiler)
+  - Prevents external projects from importing our code
+  - Appropriate for CLI applications that aren't meant to be libraries
 - One package per directory
+
+**MUST NOT:**
+- Create `pkg/` directory - this is a CLI tool, not a library
+- Export packages for external use - all code is implementation details
+- Design APIs for external consumption - users interact via CLI only
 
 ### Testing Requirements
 

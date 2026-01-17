@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/agleyzer/encodersim/internal/playlist"
-	"github.com/agleyzer/encodersim/pkg/segment"
+	"github.com/agleyzer/encodersim/internal/segment"
 )
 
 func createTestLogger() *slog.Logger {

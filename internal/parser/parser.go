@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/agleyzer/encodersim/pkg/segment"
+	"github.com/agleyzer/encodersim/internal/segment"
 	"github.com/grafov/m3u8"
 )
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/agleyzer/encodersim/pkg/segment"
+	"github.com/agleyzer/encodersim/internal/segment"
 )
 
 func createTestSegments(count int) []segment.Segment {
