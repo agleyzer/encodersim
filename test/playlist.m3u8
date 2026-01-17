@@ -1,0 +1,23 @@
+#EXTM3U
+#EXT-X-VERSION:1
+## Created with Unified Streaming Platform  (version=1.13.0-29687)
+#EXT-X-MEDIA-SEQUENCE:1
+#EXT-X-TARGETDURATION:4
+#USP-X-TIMESTAMP-MAP:MPEGTS=900000,LOCAL=1970-01-01T00:00:00Z
+#EXTINF:4, no desc
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/tears-of-steel-audio_eng=64008-video_eng=401000-1.ts
+#EXTINF:4, no desc
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/tears-of-steel-audio_eng=64008-video_eng=401000-2.ts
+#EXTINF:4, no desc
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/tears-of-steel-audio_eng=64008-video_eng=401000-3.ts
+#EXTINF:4, no desc
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/tears-of-steel-audio_eng=64008-video_eng=401000-4.ts
+#EXTINF:4, no desc
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/tears-of-steel-audio_eng=64008-video_eng=401000-5.ts
+#EXTINF:4, no desc
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/tears-of-steel-audio_eng=64008-video_eng=401000-6.ts
+#EXTINF:4, no desc
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/tears-of-steel-audio_eng=64008-video_eng=401000-7.ts
+#EXTINF:4, no desc
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.mp4/tears-of-steel-audio_eng=64008-video_eng=401000-8.ts
+#EXT-X-ENDLIST
