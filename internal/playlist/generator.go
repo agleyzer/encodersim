@@ -1,3 +1,4 @@
+// Package playlist implements live HLS playlist generation with sliding window support.
 package playlist
 
 import (
@@ -12,7 +13,7 @@ import (
 )
 
 // LivePlaylist manages a sliding window over a list of segments
-// and generates live HLS playlists
+// and generates live HLS playlists.
 type LivePlaylist struct {
 	mu              sync.RWMutex
 	segments        []segment.Segment
@@ -23,7 +24,7 @@ type LivePlaylist struct {
 	logger          *slog.Logger
 }
 
-// New creates a new LivePlaylist
+// New creates a new LivePlaylist.
 func New(segments []segment.Segment, windowSize, targetDuration int, logger *slog.Logger) (*LivePlaylist, error) {
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("cannot create playlist with zero segments")
@@ -39,16 +40,16 @@ func New(segments []segment.Segment, windowSize, targetDuration int, logger *slo
 	}
 
 	return &LivePlaylist{
-		segments:       segments,
-		windowSize:     windowSize,
+		segments:        segments,
+		windowSize:      windowSize,
 		currentPosition: 0,
-		sequenceNumber: 0,
-		targetDuration: targetDuration,
-		logger:         logger,
+		sequenceNumber:  0,
+		targetDuration:  targetDuration,
+		logger:          logger,
 	}, nil
 }
 
-// Generate creates an HLS playlist for the current window
+// Generate creates an HLS playlist for the current window.
 func (lp *LivePlaylist) Generate() string {
 	lp.mu.RLock()
 	defer lp.mu.RUnlock()
@@ -83,8 +84,8 @@ func (lp *LivePlaylist) Generate() string {
 	return b.String()
 }
 
-// getCurrentWindow returns the current window of segments
-// Caller must hold at least a read lock
+// getCurrentWindow returns the current window of segments.
+// Caller must hold at least a read lock.
 func (lp *LivePlaylist) getCurrentWindow() []segment.Segment {
 	totalSegments := len(lp.segments)
 	window := make([]segment.Segment, 0, lp.windowSize)
@@ -97,7 +98,7 @@ func (lp *LivePlaylist) getCurrentWindow() []segment.Segment {
 	return window
 }
 
-// Advance moves the sliding window forward by one segment
+// Advance moves the sliding window forward by one segment.
 func (lp *LivePlaylist) Advance() {
 	lp.mu.Lock()
 	defer lp.mu.Unlock()
@@ -113,7 +114,7 @@ func (lp *LivePlaylist) Advance() {
 }
 
 // StartAutoAdvance starts a goroutine that automatically advances the window
-// based on the target duration
+// based on the target duration.
 func (lp *LivePlaylist) StartAutoAdvance(ctx context.Context) {
 	// Use target duration as the advancement interval
 	interval := time.Duration(lp.targetDuration) * time.Second
@@ -138,7 +139,7 @@ func (lp *LivePlaylist) StartAutoAdvance(ctx context.Context) {
 	}
 }
 
-// GetStats returns current statistics about the playlist
+// GetStats returns current statistics about the playlist.
 func (lp *LivePlaylist) GetStats() map[string]interface{} {
 	lp.mu.RLock()
 	defer lp.mu.RUnlock()

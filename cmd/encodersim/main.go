@@ -1,3 +1,4 @@
+// The encodersim command converts static HLS playlists into continuously looping live HLS feeds.
 package main
 
 import (
@@ -21,9 +22,9 @@ const (
 func main() {
 	// Parse command-line flags
 	var (
-		port       = flag.Int("port", 8080, "HTTP server port")
-		windowSize = flag.Int("window-size", 6, "Number of segments in sliding window")
-		verbose    = flag.Bool("verbose", false, "Enable verbose logging")
+		port        = flag.Int("port", 8080, "HTTP server port")
+		windowSize  = flag.Int("window-size", 6, "Number of segments in sliding window")
+		verbose     = flag.Bool("verbose", false, "Enable verbose logging")
 		showVersion = flag.Bool("version", false, "Show version and exit")
 	)
 

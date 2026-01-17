@@ -1,6 +1,7 @@
+// Package segment defines data structures for HLS video segments.
 package segment
 
-// Segment represents a single HLS video segment
+// Segment represents a single HLS video segment.
 type Segment struct {
 	// URL is the original segment URL (kept as-is from the source playlist)
 	URL string

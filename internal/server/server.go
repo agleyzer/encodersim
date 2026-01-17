@@ -1,3 +1,4 @@
+// Package server implements the HTTP server for serving live HLS playlists.
 package server
 
 import (
@@ -11,7 +12,7 @@ import (
 	"github.com/agleyzer/encodersim/internal/playlist"
 )
 
-// Server serves the live HLS playlist
+// Server serves the live HLS playlist.
 type Server struct {
 	playlist   *playlist.LivePlaylist
 	port       int
@@ -19,16 +20,16 @@ type Server struct {
 	httpServer *http.Server
 }
 
-// New creates a new HTTP server
-func New(playlist *playlist.LivePlaylist, port int, logger *slog.Logger) *Server {
+// New creates a new HTTP server.
+func New(lp *playlist.LivePlaylist, port int, logger *slog.Logger) *Server {
 	return &Server{
-		playlist: playlist,
+		playlist: lp,
 		port:     port,
 		logger:   logger,
 	}
 }
 
-// Start starts the HTTP server
+// Start starts the HTTP server.
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
@@ -60,7 +61,7 @@ func (s *Server) Start(ctx context.Context) error {
 	return s.httpServer.Shutdown(shutdownCtx)
 }
 
-// handlePlaylist serves the current live playlist
+// handlePlaylist serves the current live playlist.
 func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 	// Generate the current playlist
 	playlistContent := s.playlist.Generate()
@@ -75,7 +76,7 @@ func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(playlistContent))
 }
 
-// handleHealth serves health check information
+// handleHealth serves health check information.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	stats := s.playlist.GetStats()
 
@@ -89,7 +90,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(health)
 }
 
-// loggingMiddleware logs HTTP requests
+// loggingMiddleware logs HTTP requests.
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -111,7 +112,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// responseWriter wraps http.ResponseWriter to capture the status code
+// responseWriter wraps http.ResponseWriter to capture the status code.
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode int

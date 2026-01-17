@@ -1,3 +1,4 @@
+// Package parser provides HLS playlist parsing functionality.
 package parser
 
 import (
@@ -11,13 +12,13 @@ import (
 	"github.com/grafov/m3u8"
 )
 
-// PlaylistInfo contains the parsed playlist information
+// PlaylistInfo contains the parsed playlist information.
 type PlaylistInfo struct {
 	Segments       []segment.Segment
 	TargetDuration int
 }
 
-// ParsePlaylist fetches and parses an HLS playlist from a URL
+// ParsePlaylist fetches and parses an HLS playlist from a URL.
 func ParsePlaylist(playlistURL string) (*PlaylistInfo, error) {
 	// Fetch the playlist
 	client := &http.Client{
@@ -48,7 +49,7 @@ func ParsePlaylist(playlistURL string) (*PlaylistInfo, error) {
 	mediaPlaylist := playlist.(*m3u8.MediaPlaylist)
 
 	// Extract segments
-	segments := make([]segment.Segment, 0)
+	var segments []segment.Segment
 	for i, seg := range mediaPlaylist.Segments {
 		if seg == nil {
 			break
@@ -89,7 +90,7 @@ func ParsePlaylist(playlistURL string) (*PlaylistInfo, error) {
 	}, nil
 }
 
-// resolveURL resolves a possibly relative URL against a base URL
+// resolveURL resolves a possibly relative URL against a base URL.
 func resolveURL(baseURL, relativeURL string) (string, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
@@ -106,7 +107,7 @@ func resolveURL(baseURL, relativeURL string) (string, error) {
 	return resolved.String(), nil
 }
 
-// FetchContent fetches content from a URL (helper for testing)
+// FetchContent fetches content from a URL (helper for testing).
 func FetchContent(url string) (io.ReadCloser, error) {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
