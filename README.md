@@ -165,8 +165,8 @@ encodersim/
 │   ├── parser/             # HLS playlist parsing
 │   ├── playlist/           # Live playlist generation
 │   ├── server/             # HTTP server
-│   └── config/             # Configuration types
-└── pkg/segment/            # Shared segment data structures
+│   └── segment/            # Segment data structures
+└── test/                   # Test resources and scripts
 ```
 
 ### Running Tests
