@@ -23,8 +23,11 @@ go build -o encodersim ./cmd/encodersim
 
 ### Testing
 ```bash
-# Run all tests
+# Run all tests (unit + integration)
 go test ./...
+
+# Run only unit tests (skip integration)
+go test -short ./...
 
 # Run tests with coverage
 go test -cover ./...
@@ -37,11 +40,15 @@ go test ./internal/parser
 go test ./internal/playlist
 go test ./internal/server
 
+# Run integration tests (requires binary)
+go build -o encodersim ./cmd/encodersim
+go test -v ./test/integration
+
 # Generate coverage report
 go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 
-# Integration test with local HLS playlist
+# Manual integration test with local HLS playlist
 cd test && ./test.sh
 ```
 
@@ -91,6 +98,14 @@ go mod verify
 
 5. **internal/segment**: Shared data structures
    - `Segment` struct: URL, Duration, Sequence
+
+6. **test/integration**: Integration test framework
+   - `TestHarness`: Manages test environment (HTTP server + encodersim binary)
+   - Automatically starts HTTP server serving test playlists
+   - Launches encodersim binary as subprocess
+   - Provides playlist parsing and verification helpers
+   - `WaitForCondition()`: Polls until expected conditions are met
+   - Tests verify end-to-end behavior including wrapping and discontinuity tags
 
 ### Key Design Patterns
 

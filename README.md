@@ -167,6 +167,8 @@ encodersim/
 │   ├── server/             # HTTP server
 │   └── segment/            # Segment data structures
 └── test/                   # Test resources and scripts
+    ├── integration/        # Integration tests
+    └── test.sh             # Manual testing script
 ```
 
 ### Running Tests
