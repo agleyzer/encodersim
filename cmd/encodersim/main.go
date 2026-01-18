@@ -26,18 +26,22 @@ func main() {
 		windowSize  = flag.Int("window-size", 6, "Number of segments in sliding window")
 		verbose     = flag.Bool("verbose", false, "Enable verbose logging")
 		showVersion = flag.Bool("version", false, "Show version and exit")
+		master      = flag.Bool("master", false, "Expect master playlist with multiple variants (auto-detected if not set)")
+		variants    = flag.String("variants", "", "Comma-separated list of variant indices to serve (e.g., '0,2,4'). Serves all if not specified")
 	)
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "EncoderSim - HLS Live Looping Tool v%s\n\n", version)
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] <playlist-url>\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Arguments:\n")
-		fmt.Fprintf(os.Stderr, "  <playlist-url>    URL of the static HLS playlist\n\n")
+		fmt.Fprintf(os.Stderr, "  <playlist-url>    URL of the static HLS playlist (media or master)\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExample:\n")
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  %s https://example.com/playlist.m3u8\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s --port 8080 --window-size 6 https://example.com/playlist.m3u8\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s --master https://example.com/master.m3u8\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s --master --variants 0,2 https://example.com/master.m3u8\n", os.Args[0])
 	}
 
 	flag.Parse()
@@ -80,7 +84,7 @@ func main() {
 	logger.Info("EncoderSim starting", "version", version)
 
 	// Run the application
-	if err := run(playlistURL, *port, *windowSize, logger); err != nil {
+	if err := run(playlistURL, *port, *windowSize, *master, *variants, logger); err != nil {
 		logger.Error("application error", "error", err)
 		os.Exit(1)
 	}
@@ -88,7 +92,10 @@ func main() {
 	logger.Info("EncoderSim stopped")
 }
 
-func run(playlistURL string, port, windowSize int, logger *slog.Logger) error {
+func run(playlistURL string, port, windowSize int, master bool, variants string, logger *slog.Logger) error {
+	// Note: master and variants parameters will be used when master playlist support is fully implemented
+	_ = master
+	_ = variants
 	// Parse the source playlist
 	logger.Info("fetching source playlist", "url", playlistURL)
 	playlistInfo, err := parser.ParsePlaylist(playlistURL)

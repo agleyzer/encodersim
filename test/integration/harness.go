@@ -190,9 +190,9 @@ func (h *TestHarness) findEncoderSimBinary() string {
 
 	// Try several possible locations
 	candidates := []string{
-		"../../encodersim",           // From test/integration
-		"./encodersim",               // From project root
-		"../encodersim",              // From test directory
+		"../../encodersim",            // From test/integration
+		"./encodersim",                // From project root
+		"../encodersim",               // From test directory
 		"./cmd/encodersim/encodersim", // Built in place
 	}
 

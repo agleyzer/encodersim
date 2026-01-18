@@ -11,4 +11,9 @@ type Segment struct {
 
 	// Sequence is the position in the original playlist
 	Sequence int
+
+	// VariantIndex indicates which variant this segment belongs to
+	// Only used when serving master playlists with multiple variants
+	// Set to 0 for single media playlists (non-master mode)
+	VariantIndex int
 }

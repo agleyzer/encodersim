@@ -41,12 +41,18 @@ func ParsePlaylist(playlistURL string) (*PlaylistInfo, error) {
 		return nil, fmt.Errorf("failed to parse playlist: %w", err)
 	}
 
-	// We only support media playlists, not master playlists
-	if listType != m3u8.MEDIA {
-		return nil, fmt.Errorf("expected media playlist, got master playlist")
+	// Detect playlist type and handle accordingly
+	if listType == m3u8.MASTER {
+		// Master playlist parsing will be implemented in subsequent tasks
+		// For now, return an error with helpful message
+		return nil, fmt.Errorf("master playlist support not yet implemented (coming soon)")
 	}
 
-	mediaPlaylist := playlist.(*m3u8.MediaPlaylist)
+	// Handle media playlist
+	mediaPlaylist, ok := playlist.(*m3u8.MediaPlaylist)
+	if !ok {
+		return nil, fmt.Errorf("unexpected playlist type")
+	}
 
 	// Extract segments
 	var segments []segment.Segment
