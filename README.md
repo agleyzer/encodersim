@@ -67,6 +67,23 @@ The tool auto-detects master playlists and serves:
 
 All variants advance synchronously to maintain proper ABR streaming behavior.
 
+### Limiting Content Duration
+
+Use the `--loop-after` flag to limit the amount of content used from the source playlist:
+
+```bash
+# Loop after 10 seconds of content
+encodersim --loop-after 10s https://example.com/playlist.m3u8
+
+# Loop after 1 minute 30 seconds
+encodersim --loop-after 1m30s https://example.com/playlist.m3u8
+
+# Works with master playlists too
+encodersim --loop-after 30s https://example.com/master.m3u8
+```
+
+The tool will include segments up to the specified duration (at segment boundaries), allowing up to 50% overage to avoid cutting off mid-segment. This is useful for testing live streaming behavior with shorter content loops.
+
 ### Command-Line Options
 
 ```
@@ -75,6 +92,14 @@ Options:
         HTTP server port (default 8080)
   -window-size int
         Number of segments in sliding window (default 6)
+  -loop-after duration
+        Maximum duration of content to use before looping (e.g., '10s', '1m30s')
+        Uses all segments if not specified
+  -master
+        Expect master playlist with multiple variants (auto-detected if not set)
+  -variants string
+        Comma-separated list of variant indices to serve (e.g., '0,2,4')
+        Serves all variants if not specified
   -verbose
         Enable verbose logging
   -version

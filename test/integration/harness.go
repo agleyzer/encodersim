@@ -105,6 +105,11 @@ func (h *TestHarness) AddPlaylist(playlistContent string, playlistName string) {
 
 // StartEncoderSim starts the encodersim binary pointing to the test playlist.
 func (h *TestHarness) StartEncoderSim(playlistName string, windowSize int) {
+	h.StartEncoderSimWithArgs(playlistName, windowSize)
+}
+
+// StartEncoderSimWithArgs starts the encodersim binary with additional command-line arguments.
+func (h *TestHarness) StartEncoderSimWithArgs(playlistName string, windowSize int, extraArgs ...string) {
 	h.t.Helper()
 
 	// Find encodersim binary
@@ -115,11 +120,14 @@ func (h *TestHarness) StartEncoderSim(playlistName string, windowSize int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 
-	h.encodersimCmd = exec.CommandContext(ctx, binaryPath,
+	args := []string{
 		"--port", fmt.Sprintf("%d", h.encodersimPort),
 		"--window-size", fmt.Sprintf("%d", windowSize),
-		playlistURL,
-	)
+	}
+	args = append(args, extraArgs...)
+	args = append(args, playlistURL)
+
+	h.encodersimCmd = exec.CommandContext(ctx, binaryPath, args...)
 
 	// Capture output for debugging
 	h.encodersimCmd.Stdout = os.Stdout

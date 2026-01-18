@@ -17,6 +17,10 @@ go build -o encodersim ./cmd/encodersim
 ./encodersim https://example.com/playlist.m3u8
 ./encodersim --port 8080 --window-size 6 --verbose https://example.com/playlist.m3u8
 
+# With loop-after to limit content duration
+./encodersim --loop-after 10s https://example.com/playlist.m3u8
+./encodersim --loop-after 1m30s https://example.com/master.m3u8
+
 # Show version
 ./encodersim --version
 ```
@@ -70,8 +74,10 @@ go mod verify
 ### Component Overview
 
 1. **cmd/encodersim/main.go**: CLI entry point
-   - Parses command-line flags (port, window-size, verbose, version)
-   - Validates inputs (port 1-65535, window-size >= 1)
+   - Parses command-line flags (port, window-size, loop-after, master, variants, verbose, version)
+   - Validates inputs (port 1-65535, window-size >= 1, loop-after positive duration)
+   - Implements `calculateSegmentSubset()` for --loop-after functionality
+   - Applies segment limiting to both media and master playlists
    - Orchestrates component initialization
    - Manages graceful shutdown via signal handling
 
@@ -207,6 +213,22 @@ curl http://localhost:8080/health
 - Window calculation: `getCurrentWindow()` method uses modulo arithmetic
 - Discontinuity detection: `Generate()` method compares segment sequences
 - Advancement timing: `StartAutoAdvance()` uses target duration
+
+### Using the loop-after feature
+- Location: `cmd/encodersim/main.go`
+- Function: `calculateSegmentSubset(segments, maxDuration)`
+- Purpose: Limits playlist content to specified duration
+- Algorithm:
+  - Always includes first segment (even if exceeds duration)
+  - Includes subsequent segments if cumulative duration <= maxDuration
+  - Applies 50% threshold: includes boundary segment if doesn't exceed by >50%
+  - Returns subset of segments
+- Application:
+  - Media playlists: Applied before `playlist.New()`
+  - Master playlists: Applied independently per variant before `playlist.NewMaster()`
+- Tests:
+  - Unit tests: `cmd/encodersim/main_test.go`
+  - Integration test: `test/integration/integration_test.go::TestLoopAfterFlag`
 
 ### Understanding HLS compliance
 - Version 3 required tags: `#EXTM3U`, `#EXT-X-VERSION:3`, `#EXT-X-TARGETDURATION`, `#EXT-X-MEDIA-SEQUENCE`

@@ -9,10 +9,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/agleyzer/encodersim/internal/parser"
 	"github.com/agleyzer/encodersim/internal/playlist"
+	"github.com/agleyzer/encodersim/internal/segment"
 	"github.com/agleyzer/encodersim/internal/server"
+	"github.com/agleyzer/encodersim/internal/variant"
 )
 
 const (
@@ -28,6 +31,7 @@ func main() {
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		master      = flag.Bool("master", false, "Expect master playlist with multiple variants (auto-detected if not set)")
 		variants    = flag.String("variants", "", "Comma-separated list of variant indices to serve (e.g., '0,2,4'). Serves all if not specified")
+		loopAfter   = flag.String("loop-after", "", "Maximum duration of content to use before looping (e.g., '10s', '1m30s'). Uses all segments if not specified")
 	)
 
 	flag.Usage = func() {
@@ -40,6 +44,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  %s https://example.com/playlist.m3u8\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s --port 8080 --window-size 6 https://example.com/playlist.m3u8\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s --loop-after 10s https://example.com/playlist.m3u8\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s --master https://example.com/master.m3u8\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s --master --variants 0,2 https://example.com/master.m3u8\n", os.Args[0])
 	}
@@ -84,7 +89,7 @@ func main() {
 	logger.Info("EncoderSim starting", "version", version)
 
 	// Run the application
-	if err := run(playlistURL, *port, *windowSize, *master, *variants, logger); err != nil {
+	if err := run(playlistURL, *port, *windowSize, *master, *variants, *loopAfter, logger); err != nil {
 		logger.Error("application error", "error", err)
 		os.Exit(1)
 	}
@@ -92,9 +97,23 @@ func main() {
 	logger.Info("EncoderSim stopped")
 }
 
-func run(playlistURL string, port, windowSize int, master bool, variants string, logger *slog.Logger) error {
+func run(playlistURL string, port, windowSize int, master bool, variants, loopAfter string, logger *slog.Logger) error {
 	// Note: variants parameter for filtering variants will be implemented in future enhancement
 	_ = variants
+
+	// Parse and validate loop-after duration if specified
+	var loopAfterDuration time.Duration
+	if loopAfter != "" {
+		duration, err := time.ParseDuration(loopAfter)
+		if err != nil {
+			return fmt.Errorf("invalid --loop-after duration '%s': %w", loopAfter, err)
+		}
+		if duration <= 0 {
+			return fmt.Errorf("--loop-after duration must be positive, got: %s", loopAfter)
+		}
+		loopAfterDuration = duration
+		logger.Info("loop-after specified", "duration", duration)
+	}
 
 	// Parse the source playlist
 	logger.Info("fetching source playlist", "url", playlistURL)
@@ -116,8 +135,26 @@ func run(playlistURL string, port, windowSize int, master bool, variants string,
 			"targetDuration", playlistInfo.TargetDuration,
 		)
 
+		// Apply loop-after to each variant if specified
+		variants := playlistInfo.Variants
+		if loopAfterDuration > 0 {
+			// Create a copy of variants with subset segments
+			variantsWithSubset := make([]variant.Variant, len(variants))
+			for i, v := range variants {
+				variantsWithSubset[i] = v
+				variantsWithSubset[i].Segments = calculateSegmentSubset(v.Segments, loopAfterDuration)
+				logger.Info("applied loop-after to variant",
+					"variantIndex", i,
+					"originalSegments", len(v.Segments),
+					"includedSegments", len(variantsWithSubset[i].Segments),
+					"duration", loopAfterDuration,
+				)
+			}
+			variants = variantsWithSubset
+		}
+
 		// Log variant details
-		for i, v := range playlistInfo.Variants {
+		for i, v := range variants {
 			logger.Info("variant",
 				"index", i,
 				"bandwidth", v.Bandwidth,
@@ -127,7 +164,7 @@ func run(playlistURL string, port, windowSize int, master bool, variants string,
 		}
 
 		livePlaylist, err = playlist.NewMaster(
-			playlistInfo.Variants,
+			variants,
 			windowSize,
 			logger,
 		)
@@ -140,8 +177,19 @@ func run(playlistURL string, port, windowSize int, master bool, variants string,
 			"targetDuration", playlistInfo.TargetDuration,
 		)
 
+		// Apply loop-after if specified
+		segments := playlistInfo.Segments
+		if loopAfterDuration > 0 {
+			segments = calculateSegmentSubset(playlistInfo.Segments, loopAfterDuration)
+			logger.Info("applied loop-after to media playlist",
+				"originalSegments", len(playlistInfo.Segments),
+				"includedSegments", len(segments),
+				"duration", loopAfterDuration,
+			)
+		}
+
 		livePlaylist, err = playlist.New(
-			playlistInfo.Segments,
+			segments,
 			windowSize,
 			playlistInfo.TargetDuration,
 			logger,
@@ -186,4 +234,52 @@ func run(playlistURL string, port, windowSize int, master bool, variants string,
 
 	// Start server (blocks until shutdown)
 	return srv.Start(ctx)
+}
+
+// calculateSegmentSubset returns a subset of segments that fit within the specified duration.
+// It sums segment durations from the start until the threshold is reached.
+// A segment is included if adding it doesn't exceed the threshold by more than 50%.
+// Returns at least 1 segment even if the first segment exceeds the duration.
+func calculateSegmentSubset(segments []segment.Segment, maxDuration time.Duration) []segment.Segment {
+	if len(segments) == 0 {
+		return segments
+	}
+
+	// If maxDuration is 0, return all segments
+	if maxDuration == 0 {
+		return segments
+	}
+
+	maxDurationSeconds := maxDuration.Seconds()
+	var totalDuration float64
+	var result []segment.Segment
+
+	for i, seg := range segments {
+		// Always include at least the first segment
+		if i == 0 {
+			result = append(result, seg)
+			totalDuration += seg.Duration
+			continue
+		}
+
+		// Check if adding this segment would exceed the threshold
+		newTotal := totalDuration + seg.Duration
+		if newTotal <= maxDurationSeconds {
+			// Within threshold, include it
+			result = append(result, seg)
+			totalDuration = newTotal
+		} else {
+			// Would exceed threshold - check if we should include it anyway
+			// Include if it doesn't exceed by more than 50%
+			exceedAmount := newTotal - maxDurationSeconds
+			if exceedAmount <= (maxDurationSeconds * 0.5) {
+				result = append(result, seg)
+				totalDuration = newTotal
+			}
+			// Stop processing further segments
+			break
+		}
+	}
+
+	return result
 }

@@ -143,6 +143,9 @@ https://example.com/segment001.ts
 - Support flags:
   - `--port <int>`: HTTP server port (default: 8080, range: 1-65535)
   - `--window-size <int>`: Sliding window size (default: 6, minimum: 1)
+  - `--loop-after <duration>`: Maximum content duration before looping (e.g., "10s", "1m30s")
+  - `--master`: Explicitly expect master playlist (auto-detected if not set)
+  - `--variants <string>`: Comma-separated variant indices to serve (future enhancement)
   - `--verbose`: Enable verbose/debug logging
   - `--version`: Show version and exit
 - Display usage help with `--help` or when URL is missing
@@ -493,6 +496,46 @@ EncoderSim supports HLS master playlists with multiple bitrate/quality variants.
 - All variants advance together based on maximum target duration
 - Each variant maintains independent discontinuity detection
 - Sliding windows wrap independently when variants have different lengths
+
+## Loop-After Feature
+
+The `--loop-after` flag limits the amount of content used from the source playlist before looping.
+
+**MUST:**
+- Accept duration strings in Go time.Duration format (e.g., "10s", "1m30s", "2h")
+- Validate that duration is positive (reject zero or negative values)
+- Calculate segment subset based on cumulative segment durations
+- Always include at least the first segment, even if it exceeds duration
+- Apply 50% threshold rule: include boundary segment if it doesn't exceed duration by more than 50%
+- Apply to both media playlists and all variants in master playlists independently
+- Log original vs included segment counts when loop-after is applied
+
+**Algorithm:**
+1. If maxDuration is 0 or not specified, include all segments
+2. Always include first segment regardless of its duration
+3. For subsequent segments:
+   - Calculate newTotal = currentTotal + segment.Duration
+   - If newTotal <= maxDuration, include segment
+   - If newTotal > maxDuration:
+     - Calculate exceedAmount = newTotal - maxDuration
+     - If exceedAmount <= (maxDuration * 0.5), include segment
+     - Otherwise, stop processing (break)
+4. Return subset of segments
+
+**Use Cases:**
+- Testing live streaming behavior with shorter content loops
+- Quick iteration during development without processing full-length content
+- Reducing memory footprint by limiting segment metadata
+- Creating demo streams with short repeating clips
+
+**Example:**
+```bash
+# 30-minute source playlist, loop after 10 seconds
+encodersim --loop-after 10s https://example.com/playlist.m3u8
+
+# Master playlist with 5-minute variants, loop after 30 seconds
+encodersim --loop-after 30s https://example.com/master.m3u8
+```
 
 ## Non-Requirements
 

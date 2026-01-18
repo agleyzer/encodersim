@@ -2,6 +2,7 @@
 package integration
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -390,6 +391,129 @@ func createTestMediaPlaylist(variant string, numSegments int, duration float64) 
 		sb.WriteString("https://example.com/")
 		sb.WriteString(variant)
 		sb.WriteString("_seg")
+		sb.WriteString(padNumber(i, 3))
+		sb.WriteString(".ts\n")
+	}
+
+	sb.WriteString("#EXT-X-ENDLIST\n")
+
+	return sb.String()
+}
+
+// TestLoopAfterFlag verifies that the --loop-after flag limits playlist duration correctly.
+func TestLoopAfterFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	// Create test harness
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Create a test playlist with 10 segments, each 2 seconds long (20 seconds total)
+	testPlaylist := createTestPlaylistWithDuration(10, 2.0)
+
+	// Start HTTP server serving the test playlist
+	harness.StartHTTPServer(testPlaylist, "test.m3u8")
+
+	// Start encodersim with window size of 6 and --loop-after=5s
+	// This should limit to 3 segments (0, 1, 2 = 6 seconds, within 50% threshold of 5s)
+	harness.StartEncoderSimWithArgs("test.m3u8", 6, "--loop-after", "5s")
+
+	// Test Phase 1: Verify initial playlist uses subset
+	t.Log("Phase 1: Verifying loop-after limits segments...")
+	playlist := harness.FetchPlaylist()
+	parsed := ParsePlaylist(playlist)
+
+	// Should not exceed ~7.5 seconds (5s + 50% = 7.5s)
+	// With 2-second segments: seg0 (2s), seg1 (4s), seg2 (6s) - includes all 3
+	if len(parsed.Segments) != 3 {
+		t.Errorf("expected 3 segments after loop-after, got %d", len(parsed.Segments))
+	}
+
+	// Verify we have the first 3 segments
+	expectedURLs := []string{"segment000.ts", "segment001.ts", "segment002.ts"}
+	for i, seg := range parsed.Segments {
+		if i < len(expectedURLs) && !strings.Contains(seg.URL, expectedURLs[i]) {
+			t.Errorf("segment %d: expected URL to contain %s, got %s", i, expectedURLs[i], seg.URL)
+		}
+	}
+
+	t.Log("Phase 1: Loop-after limit verified ✓")
+
+	// Test Phase 2: Verify wrapping behavior with limited segments
+	t.Log("Phase 2: Waiting for playlist to wrap with limited segments...")
+
+	// Window should wrap back to segment 0 after advancing through segments 0, 1, 2
+	// Sequence progression with 3 segments and window of 6:
+	// Since we only have 3 segments total, window will be partially filled
+	// Seq 0: [0,1,2] (only 3 segments available)
+	// Seq 1: [1,2,0] (wraps)
+	// Seq 2: [2,0,1]
+	// Seq 3: [0,1,2]
+
+	var wrappedPlaylist *ParsedPlaylist
+	var foundDiscontinuity bool
+
+	harness.WaitForCondition(func() bool {
+		playlist := harness.FetchPlaylist()
+		parsed := ParsePlaylist(playlist)
+
+		// Look for discontinuity tag
+		for _, seg := range parsed.Segments {
+			if seg.Discontinuity {
+				foundDiscontinuity = true
+				wrappedPlaylist = parsed
+				return true
+			}
+		}
+
+		return false
+	}, 15*time.Second, "playlist to wrap with limited segments")
+
+	if !foundDiscontinuity {
+		t.Fatal("expected to find discontinuity tag when limited playlist wraps")
+	}
+
+	t.Logf("Phase 2: Found discontinuity at sequence %d ✓", wrappedPlaylist.MediaSequence)
+
+	// Test Phase 3: Verify continuous operation with limit
+	t.Log("Phase 3: Verifying continuous operation with loop-after...")
+
+	for i := 0; i < 3; i++ {
+		time.Sleep(2500 * time.Millisecond)
+		playlist := harness.FetchPlaylist()
+		parsed := ParsePlaylist(playlist)
+
+		// Should always have 3 segments (our limit)
+		if len(parsed.Segments) != 3 {
+			t.Errorf("iteration %d: expected 3 segments, got %d", i, len(parsed.Segments))
+		}
+
+		// Should not have end list tag
+		if parsed.HasEndList {
+			t.Errorf("iteration %d: playlist should remain live", i)
+		}
+	}
+
+	t.Log("Phase 3: Continuous operation with loop-after verified ✓")
+	t.Log("✅ All phases passed!")
+}
+
+// createTestPlaylistWithDuration creates a test HLS playlist with specific segment duration.
+func createTestPlaylistWithDuration(numSegments int, duration float64) string {
+	var sb strings.Builder
+
+	sb.WriteString("#EXTM3U\n")
+	sb.WriteString("#EXT-X-VERSION:3\n")
+	sb.WriteString("#EXT-X-TARGETDURATION:2\n")
+	sb.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
+
+	for i := 0; i < numSegments; i++ {
+		sb.WriteString("#EXTINF:")
+		sb.WriteString(fmt.Sprintf("%.3f", duration))
+		sb.WriteString(",\n")
+		sb.WriteString("https://example.com/segment")
 		sb.WriteString(padNumber(i, 3))
 		sb.WriteString(".ts\n")
 	}
