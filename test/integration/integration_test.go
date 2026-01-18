@@ -191,3 +191,210 @@ func padNumber(num, width int) string {
 	}
 	return result
 }
+
+// TestMasterPlaylist verifies that master playlists with multiple variants work correctly.
+func TestMasterPlaylist(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	// Create test harness
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Create master playlist with 2 variants
+	masterPlaylist := createTestMasterPlaylist()
+	lowVariantPlaylist := createTestMediaPlaylist("low", 5, 1.0)
+	highVariantPlaylist := createTestMediaPlaylist("high", 5, 1.0)
+
+	// Start HTTP server serving the master and variant playlists
+	harness.StartHTTPServer(masterPlaylist, "master.m3u8")
+	harness.AddPlaylist(lowVariantPlaylist, "low.m3u8")
+	harness.AddPlaylist(highVariantPlaylist, "high.m3u8")
+
+	// Start encodersim with window size of 3
+	harness.StartEncoderSim("master.m3u8", 3)
+
+	// Test Phase 1: Verify master playlist
+	t.Log("Phase 1: Verifying master playlist...")
+	playlist := harness.FetchPlaylist()
+
+	// Master playlist should contain STREAM-INF tags
+	if !strings.Contains(playlist, "#EXT-X-STREAM-INF") {
+		t.Error("master playlist should contain #EXT-X-STREAM-INF tag")
+	}
+
+	// Should have variant playlist URLs
+	if !strings.Contains(playlist, "/variant0/playlist.m3u8") {
+		t.Error("master playlist should contain variant0 URL")
+	}
+	if !strings.Contains(playlist, "/variant1/playlist.m3u8") {
+		t.Error("master playlist should contain variant1 URL")
+	}
+
+	// Should have bandwidth info
+	if !strings.Contains(playlist, "BANDWIDTH=1280000") {
+		t.Error("master playlist should contain low variant bandwidth")
+	}
+	if !strings.Contains(playlist, "BANDWIDTH=2560000") {
+		t.Error("master playlist should contain high variant bandwidth")
+	}
+
+	// Master playlist should NOT have segment URLs
+	if strings.Contains(playlist, "_seg") {
+		t.Error("master playlist should not contain segment URLs")
+	}
+
+	t.Log("Phase 1: Master playlist verified ✓")
+
+	// Test Phase 2: Verify variant playlists
+	t.Log("Phase 2: Verifying variant playlists...")
+
+	// Fetch low variant playlist
+	lowPlaylist := harness.FetchVariantPlaylist(0)
+	parsedLow := ParsePlaylist(lowPlaylist)
+
+	if len(parsedLow.Segments) != 3 {
+		t.Errorf("expected 3 segments in low variant window, got %d", len(parsedLow.Segments))
+	}
+
+	// Should have low variant segments
+	if !strings.Contains(parsedLow.Segments[0].URL, "low_seg") {
+		t.Error("low variant playlist should contain low variant segments")
+	}
+
+	// Fetch high variant playlist
+	highPlaylist := harness.FetchVariantPlaylist(1)
+	parsedHigh := ParsePlaylist(highPlaylist)
+
+	if len(parsedHigh.Segments) != 3 {
+		t.Errorf("expected 3 segments in high variant window, got %d", len(parsedHigh.Segments))
+	}
+
+	// Should have high variant segments
+	if !strings.Contains(parsedHigh.Segments[0].URL, "high_seg") {
+		t.Error("high variant playlist should contain high variant segments")
+	}
+
+	t.Log("Phase 2: Variant playlists verified ✓")
+
+	// Test Phase 3: Verify synchronized advancement
+	t.Log("Phase 3: Verifying synchronized advancement...")
+
+	initialLowSeq := parsedLow.MediaSequence
+	initialHighSeq := parsedHigh.MediaSequence
+
+	// Wait for advancement
+	time.Sleep(2 * time.Second)
+
+	lowPlaylist = harness.FetchVariantPlaylist(0)
+	parsedLow = ParsePlaylist(lowPlaylist)
+	highPlaylist = harness.FetchVariantPlaylist(1)
+	parsedHigh = ParsePlaylist(highPlaylist)
+
+	// Both variants should have advanced
+	if parsedLow.MediaSequence <= initialLowSeq {
+		t.Error("low variant should have advanced")
+	}
+	if parsedHigh.MediaSequence <= initialHighSeq {
+		t.Error("high variant should have advanced")
+	}
+
+	// Both variants should have the same sequence number (synchronized)
+	if parsedLow.MediaSequence != parsedHigh.MediaSequence {
+		t.Errorf("variants should be synchronized: low=%d, high=%d",
+			parsedLow.MediaSequence, parsedHigh.MediaSequence)
+	}
+
+	t.Log("Phase 3: Synchronized advancement verified ✓")
+
+	// Test Phase 4: Verify wrapping with discontinuity in variants
+	t.Log("Phase 4: Waiting for variants to wrap...")
+
+	var foundLowDiscontinuity, foundHighDiscontinuity bool
+
+	harness.WaitForCondition(func() bool {
+		lowPlaylist := harness.FetchVariantPlaylist(0)
+		parsedLow := ParsePlaylist(lowPlaylist)
+		highPlaylist := harness.FetchVariantPlaylist(1)
+		parsedHigh := ParsePlaylist(highPlaylist)
+
+		for _, seg := range parsedLow.Segments {
+			if seg.Discontinuity {
+				foundLowDiscontinuity = true
+			}
+		}
+
+		for _, seg := range parsedHigh.Segments {
+			if seg.Discontinuity {
+				foundHighDiscontinuity = true
+			}
+		}
+
+		return foundLowDiscontinuity && foundHighDiscontinuity
+	}, 15*time.Second, "variants to wrap and show discontinuity")
+
+	if !foundLowDiscontinuity {
+		t.Error("expected discontinuity in low variant when wrapping")
+	}
+	if !foundHighDiscontinuity {
+		t.Error("expected discontinuity in high variant when wrapping")
+	}
+
+	t.Log("Phase 4: Variant wrapping with discontinuity verified ✓")
+
+	// Test Phase 5: Verify health endpoint
+	t.Log("Phase 5: Verifying health endpoint...")
+
+	health := harness.FetchHealth()
+
+	// Should indicate master mode
+	if !strings.Contains(health, "\"is_master\":true") {
+		t.Error("health endpoint should indicate master mode")
+	}
+
+	// Should have variant info
+	if !strings.Contains(health, "variants") {
+		t.Error("health endpoint should contain variant information")
+	}
+
+	t.Log("Phase 5: Health endpoint verified ✓")
+	t.Log("✅ All phases passed!")
+}
+
+// createTestMasterPlaylist creates a test HLS master playlist.
+func createTestMasterPlaylist() string {
+	var sb strings.Builder
+
+	sb.WriteString("#EXTM3U\n")
+	sb.WriteString("#EXT-X-VERSION:3\n")
+	sb.WriteString("#EXT-X-STREAM-INF:BANDWIDTH=1280000,RESOLUTION=640x360,CODECS=\"avc1.4d401e,mp4a.40.2\"\n")
+	sb.WriteString("low.m3u8\n")
+	sb.WriteString("#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1280x720,CODECS=\"avc1.4d401f,mp4a.40.2\"\n")
+	sb.WriteString("high.m3u8\n")
+
+	return sb.String()
+}
+
+// createTestMediaPlaylist creates a test HLS media playlist with a variant prefix.
+func createTestMediaPlaylist(variant string, numSegments int, duration float64) string {
+	var sb strings.Builder
+
+	sb.WriteString("#EXTM3U\n")
+	sb.WriteString("#EXT-X-VERSION:3\n")
+	sb.WriteString("#EXT-X-TARGETDURATION:1\n")
+	sb.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
+
+	for i := 0; i < numSegments; i++ {
+		sb.WriteString("#EXTINF:1.000,\n")
+		sb.WriteString("https://example.com/")
+		sb.WriteString(variant)
+		sb.WriteString("_seg")
+		sb.WriteString(padNumber(i, 3))
+		sb.WriteString(".ts\n")
+	}
+
+	sb.WriteString("#EXT-X-ENDLIST\n")
+
+	return sb.String()
+}

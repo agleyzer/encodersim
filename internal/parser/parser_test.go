@@ -144,12 +144,123 @@ func TestParsePlaylist_HTTPError(t *testing.T) {
 }
 
 func TestParsePlaylist_MasterPlaylist(t *testing.T) {
+	// Create a test HTTP server with master playlist and variant media playlists
+	variantRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.WriteHeader(http.StatusOK)
+
+		if r.URL.Path == "/" || r.URL.Path == "/master.m3u8" {
+			// Master playlist
+			playlist := `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=1280000,RESOLUTION=640x360,CODECS="avc1.4d401e,mp4a.40.2"
+low.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=2560000,RESOLUTION=1280x720,CODECS="avc1.4d401f,mp4a.40.2"
+high.m3u8
+`
+			w.Write([]byte(playlist))
+		} else if r.URL.Path == "/low.m3u8" {
+			// Low variant media playlist
+			variantRequests++
+			playlist := `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+segment_low_001.ts
+#EXTINF:10.0,
+segment_low_002.ts
+#EXT-X-ENDLIST
+`
+			w.Write([]byte(playlist))
+		} else if r.URL.Path == "/high.m3u8" {
+			// High variant media playlist
+			variantRequests++
+			playlist := `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+segment_high_001.ts
+#EXTINF:10.0,
+segment_high_002.ts
+#EXT-X-ENDLIST
+`
+			w.Write([]byte(playlist))
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	info, err := ParsePlaylist(server.URL + "/master.m3u8")
+	if err != nil {
+		t.Fatalf("Expected no error for master playlist, got %v", err)
+	}
+
+	// Verify master playlist properties
+	if !info.IsMaster {
+		t.Error("Expected IsMaster to be true")
+	}
+
+	if len(info.Variants) != 2 {
+		t.Fatalf("Expected 2 variants, got %d", len(info.Variants))
+	}
+
+	// Verify low variant
+	lowVariant := info.Variants[0]
+	if lowVariant.Bandwidth != 1280000 {
+		t.Errorf("Expected low variant bandwidth 1280000, got %d", lowVariant.Bandwidth)
+	}
+	if lowVariant.Resolution != "640x360" {
+		t.Errorf("Expected low variant resolution '640x360', got '%s'", lowVariant.Resolution)
+	}
+	if lowVariant.Codecs != "avc1.4d401e,mp4a.40.2" {
+		t.Errorf("Expected low variant codecs, got '%s'", lowVariant.Codecs)
+	}
+	if len(lowVariant.Segments) != 2 {
+		t.Errorf("Expected low variant to have 2 segments, got %d", len(lowVariant.Segments))
+	}
+	if lowVariant.TargetDuration != 10 {
+		t.Errorf("Expected low variant target duration 10, got %d", lowVariant.TargetDuration)
+	}
+
+	// Verify high variant
+	highVariant := info.Variants[1]
+	if highVariant.Bandwidth != 2560000 {
+		t.Errorf("Expected high variant bandwidth 2560000, got %d", highVariant.Bandwidth)
+	}
+	if highVariant.Resolution != "1280x720" {
+		t.Errorf("Expected high variant resolution '1280x720', got '%s'", highVariant.Resolution)
+	}
+	if len(highVariant.Segments) != 2 {
+		t.Errorf("Expected high variant to have 2 segments, got %d", len(highVariant.Segments))
+	}
+
+	// Verify segments have variant index set
+	if lowVariant.Segments[0].VariantIndex != 0 {
+		t.Errorf("Expected low variant segment to have VariantIndex 0, got %d", lowVariant.Segments[0].VariantIndex)
+	}
+	if highVariant.Segments[0].VariantIndex != 1 {
+		t.Errorf("Expected high variant segment to have VariantIndex 1, got %d", highVariant.Segments[0].VariantIndex)
+	}
+
+	// Verify target duration is max across variants
+	if info.TargetDuration != 10 {
+		t.Errorf("Expected master playlist target duration 10, got %d", info.TargetDuration)
+	}
+
+	// Verify both variant playlists were fetched
+	if variantRequests != 2 {
+		t.Errorf("Expected 2 variant playlist requests, got %d", variantRequests)
+	}
+}
+
+func TestParsePlaylist_MasterPlaylist_NoVariants(t *testing.T) {
+	// Note: An empty master playlist will be parsed as a media playlist by m3u8 library
+	// and will fail with "playlist contains no segments"
+	// This test verifies proper error handling for edge cases
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playlist := `#EXTM3U
-#EXT-X-STREAM-INF:BANDWIDTH=1280000
-low.m3u8
-#EXT-X-STREAM-INF:BANDWIDTH=2560000
-high.m3u8
+#EXT-X-VERSION:3
 `
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(playlist))
@@ -158,7 +269,77 @@ high.m3u8
 
 	_, err := ParsePlaylist(server.URL)
 	if err == nil {
-		t.Fatal("Expected error for master playlist, got nil")
+		t.Fatal("Expected error for empty playlist, got nil")
+	}
+	// Accept either error message since the m3u8 library may parse this as media playlist
+	if err.Error() != "master playlist contains no variants" && err.Error() != "playlist contains no segments" {
+		t.Errorf("Expected error about no variants or no segments, got: %v", err)
+	}
+}
+
+func TestParsePlaylist_MasterPlaylist_VariantFetchError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			playlist := `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=1280000
+variant.m3u8
+`
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(playlist))
+		} else {
+			// Variant returns error
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	_, err := ParsePlaylist(server.URL)
+	if err == nil {
+		t.Fatal("Expected error when variant fetch fails, got nil")
+	}
+}
+
+func TestParsePlaylist_MasterPlaylist_RelativeURLs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		w.WriteHeader(http.StatusOK)
+
+		if r.URL.Path == "/playlists/master.m3u8" {
+			playlist := `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=1280000
+variants/low.m3u8
+`
+			w.Write([]byte(playlist))
+		} else if r.URL.Path == "/playlists/variants/low.m3u8" {
+			playlist := `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXTINF:10.0,
+../segments/seg001.ts
+#EXT-X-ENDLIST
+`
+			w.Write([]byte(playlist))
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	info, err := ParsePlaylist(server.URL + "/playlists/master.m3u8")
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Verify variant URL was resolved correctly
+	expectedVariantURL := server.URL + "/playlists/variants/low.m3u8"
+	if info.Variants[0].PlaylistURL != expectedVariantURL {
+		t.Errorf("Expected variant URL %s, got %s", expectedVariantURL, info.Variants[0].PlaylistURL)
+	}
+
+	// Verify segment URL was resolved correctly relative to variant playlist
+	expectedSegmentURL := server.URL + "/playlists/segments/seg001.ts"
+	if info.Variants[0].Segments[0].URL != expectedSegmentURL {
+		t.Errorf("Expected segment URL %s, got %s", expectedSegmentURL, info.Variants[0].Segments[0].URL)
 	}
 }
 

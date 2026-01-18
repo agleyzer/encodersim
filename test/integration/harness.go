@@ -23,6 +23,7 @@ type TestHarness struct {
 	encodersimCmd  *exec.Cmd
 	encodersimPort int
 	testDataDir    string
+	tempDir        string // Track temp directory for adding playlists
 	cancel         context.CancelFunc
 }
 
@@ -54,17 +55,17 @@ func (h *TestHarness) StartHTTPServer(playlistContent string, playlistName strin
 	h.t.Helper()
 
 	// Create a temporary directory for test files
-	tempDir := h.t.TempDir()
+	h.tempDir = h.t.TempDir()
 
 	// Write playlist content to file
-	playlistPath := filepath.Join(tempDir, playlistName)
+	playlistPath := filepath.Join(h.tempDir, playlistName)
 	if err := os.WriteFile(playlistPath, []byte(playlistContent), 0644); err != nil {
 		h.t.Fatalf("failed to write test playlist: %v", err)
 	}
 
 	// Create file server
 	mux := http.NewServeMux()
-	fileServer := http.FileServer(http.Dir(tempDir))
+	fileServer := http.FileServer(http.Dir(h.tempDir))
 	mux.Handle("/", fileServer)
 
 	h.httpServer = &http.Server{
@@ -82,6 +83,24 @@ func (h *TestHarness) StartHTTPServer(playlistContent string, playlistName strin
 	// Wait for server to be ready
 	h.waitForServer(fmt.Sprintf("http://localhost:%d", h.httpPort), 5*time.Second)
 	h.t.Logf("HTTP server started on port %d", h.httpPort)
+}
+
+// AddPlaylist adds an additional playlist to the HTTP server.
+// Must be called after StartHTTPServer.
+func (h *TestHarness) AddPlaylist(playlistContent string, playlistName string) {
+	h.t.Helper()
+
+	if h.tempDir == "" {
+		h.t.Fatal("StartHTTPServer must be called before AddPlaylist")
+	}
+
+	// Write playlist content to file in the same temp directory
+	playlistPath := filepath.Join(h.tempDir, playlistName)
+	if err := os.WriteFile(playlistPath, []byte(playlistContent), 0644); err != nil {
+		h.t.Fatalf("failed to write additional playlist: %v", err)
+	}
+
+	h.t.Logf("Added playlist: %s", playlistName)
 }
 
 // StartEncoderSim starts the encodersim binary pointing to the test playlist.
@@ -135,6 +154,29 @@ func (h *TestHarness) FetchPlaylist() string {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		h.t.Fatalf("failed to read playlist body: %v", err)
+	}
+
+	return string(body)
+}
+
+// FetchVariantPlaylist fetches a variant playlist from encodersim.
+func (h *TestHarness) FetchVariantPlaylist(variantIndex int) string {
+	h.t.Helper()
+
+	url := fmt.Sprintf("http://localhost:%d/variant%d/playlist.m3u8", h.encodersimPort, variantIndex)
+	resp, err := http.Get(url)
+	if err != nil {
+		h.t.Fatalf("failed to fetch variant %d playlist: %v", variantIndex, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		h.t.Fatalf("unexpected status code for variant %d: %d", variantIndex, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		h.t.Fatalf("failed to read variant %d playlist body: %v", variantIndex, err)
 	}
 
 	return string(body)
