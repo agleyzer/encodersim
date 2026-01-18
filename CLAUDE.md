@@ -78,34 +78,44 @@ go mod verify
 2. **internal/parser**: HLS playlist fetching and parsing
    - `ParsePlaylist()`: Fetches m3u8 from URL, returns PlaylistInfo
    - Uses `github.com/grafov/m3u8` library
-   - Resolves relative segment URLs to absolute URLs
-   - Only accepts media playlists (rejects master playlists)
+   - Auto-detects master vs media playlists
+   - For master playlists: parses variants, fetches each variant's media playlist
+   - For media playlists: parses segments directly
+   - Resolves relative URLs (variant playlists and segments) to absolute URLs
    - Calculates target duration if not specified in playlist
 
 3. **internal/playlist**: Live playlist generation with sliding window
    - `LivePlaylist`: Thread-safe with sync.RWMutex
-   - `Generate()`: Creates HLS m3u8 content for current window
-   - `Advance()`: Moves window forward by one segment
+   - Supports both media playlist mode and master playlist mode
+   - `Generate()`: Creates HLS m3u8 media playlist for current window
+   - `GenerateMaster()`: Creates HLS master playlist with variant links
+   - `GenerateVariant(index)`: Creates media playlist for specific variant
+   - `Advance()`: Moves window forward (all variants synchronously in master mode)
    - `StartAutoAdvance()`: Goroutine that advances window based on target duration
-   - `GetStats()`: Returns current state (position, sequence, etc.)
-   - **Discontinuity detection**: Automatically inserts `#EXT-X-DISCONTINUITY` tag when playlist loops back to start
+   - `GetStats()`: Returns current state (per-variant in master mode)
+   - **Discontinuity detection**: Automatically inserts `#EXT-X-DISCONTINUITY` tag when playlist loops back to start (per-variant in master mode)
 
 4. **internal/server**: HTTP server
-   - `GET /playlist.m3u8`: Serves current live playlist
-   - `GET /health`: Returns JSON with statistics
+   - `GET /playlist.m3u8`: Serves current live playlist (master or media)
+   - `GET /variant0/playlist.m3u8`, `/variant1/playlist.m3u8`, etc.: Variant playlists (master mode only)
+   - `GET /health`: Returns JSON with statistics (per-variant in master mode)
    - Logging middleware for all requests
    - Graceful shutdown with 10-second timeout
 
 5. **internal/segment**: Shared data structures
-   - `Segment` struct: URL, Duration, Sequence
+   - `Segment` struct: URL, Duration, Sequence, VariantIndex
 
-6. **test/integration**: Integration test framework
+6. **internal/variant**: Multi-variant data structures
+   - `Variant` struct: Bandwidth, Resolution, Codecs, PlaylistURL, Segments, TargetDuration
+
+7. **test/integration**: Integration test framework
    - `TestHarness`: Manages test environment (HTTP server + encodersim binary)
    - Automatically starts HTTP server serving test playlists
    - Launches encodersim binary as subprocess
    - Provides playlist parsing and verification helpers
    - `WaitForCondition()`: Polls until expected conditions are met
    - Tests verify end-to-end behavior including wrapping and discontinuity tags
+   - Master playlist tests verify multi-variant synchronization
 
 ### Key Design Patterns
 
@@ -114,6 +124,7 @@ go mod verify
 - **Discontinuity Signaling**: Detects loop points by comparing segment sequence numbers, inserts `#EXT-X-DISCONTINUITY` tag per HLS spec
 - **Thread Safety**: RWMutex protects shared state in LivePlaylist (multiple readers, single writer)
 - **Graceful Shutdown**: Context-based cancellation propagates through goroutines
+- **Multi-Variant Synchronization**: All variants advance together on a single global timer based on maximum target duration across variants
 
 ### Data Flow
 1. User provides static HLS playlist URL

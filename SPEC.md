@@ -24,14 +24,16 @@ EncoderSim is a Go command-line tool that converts static HLS (HTTP Live Streami
 ### 1. Input Requirements
 
 **MUST:**
-- Accept a URL to a static HLS media playlist (m3u8) as input
+- Accept a URL to a static HLS playlist (m3u8) as input
+  - Support media playlists (single variant)
+  - Support master playlists (multi-variant/multi-bitrate)
 - Support both HTTP and HTTPS URLs
 - Parse HLS version 3+ playlists
 - Handle both relative and absolute segment URLs
 - Resolve relative segment URLs to absolute URLs based on playlist location
+- Auto-detect playlist type (master vs media)
 
 **MUST NOT:**
-- Accept master playlists (multi-bitrate) - only media playlists
 - Download or cache video segments
 - Modify original segment URLs (except for resolution to absolute paths)
 
@@ -161,8 +163,8 @@ encodersim --port 8080 --window-size 6 https://example.com/playlist.m3u8
   - Invalid URLs
   - HTTP errors (404, 500, etc.)
   - Invalid m3u8 format
-  - Master playlists (instead of media playlists)
   - Empty playlists
+  - Master playlists with no variants
   - Invalid command-line arguments
 - Use Go error wrapping (`fmt.Errorf` with `%w`)
 - Error messages must not be capitalized (except proper nouns/acronyms)
@@ -471,11 +473,31 @@ The project is considered complete when:
 7. ✅ Tool works with real-world HLS playlists
 8. ✅ No known critical bugs
 
+## Multi-Variant Playlist Support
+
+EncoderSim supports HLS master playlists with multiple bitrate/quality variants.
+
+**Master Playlist Mode:**
+- Automatically detects master playlists during parsing
+- Fetches and parses all variant media playlists
+- Maintains separate sliding windows for each variant
+- Advances all variants synchronously
+- Generates compliant master playlist with `#EXT-X-STREAM-INF` tags
+
+**URL Structure:**
+- Master playlist: `GET /playlist.m3u8`
+- Variant playlists: `GET /variant0/playlist.m3u8`, `/variant1/playlist.m3u8`, etc.
+- Health endpoint includes per-variant statistics
+
+**Synchronization:**
+- All variants advance together based on maximum target duration
+- Each variant maintains independent discontinuity detection
+- Sliding windows wrap independently when variants have different lengths
+
 ## Non-Requirements
 
 The following are explicitly OUT OF SCOPE:
 
-- Multi-bitrate support (master playlists)
 - Segment downloading or caching
 - Segment transcoding or manipulation
 - DVR/seeking functionality

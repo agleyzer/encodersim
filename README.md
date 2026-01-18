@@ -53,6 +53,20 @@ This starts a live HLS server on port 8080 with a 6-segment sliding window.
 encodersim --port 8080 --window-size 10 https://example.com/playlist.m3u8
 ```
 
+### Master Playlist Support
+
+EncoderSim supports multi-bitrate (master) playlists:
+
+```bash
+encodersim https://example.com/master.m3u8
+```
+
+The tool auto-detects master playlists and serves:
+- **Master Playlist**: `http://localhost:8080/playlist.m3u8`
+- **Variant Playlists**: `http://localhost:8080/variant0/playlist.m3u8`, `/variant1/playlist.m3u8`, etc.
+
+All variants advance synchronously to maintain proper ABR streaming behavior.
+
 ### Command-Line Options
 
 ```
@@ -149,10 +163,10 @@ The generated playlists follow the HLS specification:
 
 ## Limitations
 
-- Only supports media playlists (not master playlists with multiple bitrates)
 - Segments must be accessible from client network
 - No DVR or seeking backwards in time
 - No authentication for segment URLs
+- Variants with different segment counts may have minor sync differences when looping
 
 ## Development
 
@@ -162,10 +176,11 @@ The generated playlists follow the HLS specification:
 encodersim/
 ├── cmd/encodersim/          # Main application entry point
 ├── internal/                # Private implementation packages
-│   ├── parser/             # HLS playlist parsing
+│   ├── parser/             # HLS playlist parsing (master & media)
 │   ├── playlist/           # Live playlist generation
-│   ├── server/             # HTTP server
-│   └── segment/            # Segment data structures
+│   ├── server/             # HTTP server & routing
+│   ├── segment/            # Segment data structures
+│   └── variant/            # Variant stream data structures
 └── test/                   # Test resources and scripts
     ├── integration/        # Integration tests
     └── test.sh             # Manual testing script
