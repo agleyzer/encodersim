@@ -93,9 +93,9 @@ func main() {
 }
 
 func run(playlistURL string, port, windowSize int, master bool, variants string, logger *slog.Logger) error {
-	// Note: master and variants parameters will be used when master playlist support is fully implemented
-	_ = master
+	// Note: variants parameter for filtering variants will be implemented in future enhancement
 	_ = variants
+
 	// Parse the source playlist
 	logger.Info("fetching source playlist", "url", playlistURL)
 	playlistInfo, err := parser.ParsePlaylist(playlistURL)
@@ -103,20 +103,52 @@ func run(playlistURL string, port, windowSize int, master bool, variants string,
 		return fmt.Errorf("failed to parse playlist: %w", err)
 	}
 
-	logger.Info("parsed playlist",
-		"segments", len(playlistInfo.Segments),
-		"targetDuration", playlistInfo.TargetDuration,
-	)
+	// Check if explicit mode is set, otherwise use detected mode
+	if master && !playlistInfo.IsMaster {
+		return fmt.Errorf("--master flag set but URL is a media playlist, not a master playlist")
+	}
 
-	// Create the live playlist generator
-	livePlaylist, err := playlist.New(
-		playlistInfo.Segments,
-		windowSize,
-		playlistInfo.TargetDuration,
-		logger,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create live playlist: %w", err)
+	// Create the live playlist generator based on playlist type
+	var livePlaylist *playlist.LivePlaylist
+	if playlistInfo.IsMaster {
+		logger.Info("parsed master playlist",
+			"variants", len(playlistInfo.Variants),
+			"targetDuration", playlistInfo.TargetDuration,
+		)
+
+		// Log variant details
+		for i, v := range playlistInfo.Variants {
+			logger.Info("variant",
+				"index", i,
+				"bandwidth", v.Bandwidth,
+				"resolution", v.Resolution,
+				"segments", len(v.Segments),
+			)
+		}
+
+		livePlaylist, err = playlist.NewMaster(
+			playlistInfo.Variants,
+			windowSize,
+			logger,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create live master playlist: %w", err)
+		}
+	} else {
+		logger.Info("parsed media playlist",
+			"segments", len(playlistInfo.Segments),
+			"targetDuration", playlistInfo.TargetDuration,
+		)
+
+		livePlaylist, err = playlist.New(
+			playlistInfo.Segments,
+			windowSize,
+			playlistInfo.TargetDuration,
+			logger,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create live playlist: %w", err)
+		}
 	}
 
 	// Create context for graceful shutdown
@@ -139,10 +171,18 @@ func run(playlistURL string, port, windowSize int, master bool, variants string,
 	// Create and start the HTTP server
 	srv := server.New(livePlaylist, port, logger)
 
-	logger.Info("live HLS stream ready",
-		"url", fmt.Sprintf("http://localhost:%d/playlist.m3u8", port),
-		"health", fmt.Sprintf("http://localhost:%d/health", port),
-	)
+	if playlistInfo.IsMaster {
+		logger.Info("live HLS stream ready (master playlist mode)",
+			"master_url", fmt.Sprintf("http://localhost:%d/playlist.m3u8", port),
+			"health", fmt.Sprintf("http://localhost:%d/health", port),
+			"variants", len(playlistInfo.Variants),
+		)
+	} else {
+		logger.Info("live HLS stream ready",
+			"url", fmt.Sprintf("http://localhost:%d/playlist.m3u8", port),
+			"health", fmt.Sprintf("http://localhost:%d/health", port),
+		)
+	}
 
 	// Start server (blocks until shutdown)
 	return srv.Start(ctx)

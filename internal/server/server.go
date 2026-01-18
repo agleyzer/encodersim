@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/agleyzer/encodersim/internal/playlist"
@@ -37,6 +39,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/playlist.m3u8", s.handlePlaylist)
 	mux.HandleFunc("/health", s.handleHealth)
 
+	// Register variant-specific handler (for master playlists)
+	// This catches requests like /variant0/playlist.m3u8, /variant1/playlist.m3u8, etc.
+	mux.HandleFunc("/", s.handleVariantPlaylist)
+
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
 		Handler: s.loggingMiddleware(mux),
@@ -62,9 +68,57 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 // handlePlaylist serves the current live playlist.
+// For media playlists, generates media playlist content.
+// For master playlists, generates master playlist content.
 func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
-	// Generate the current playlist
-	playlistContent := s.playlist.Generate()
+	// Check playlist mode and generate appropriate content
+	stats := s.playlist.GetStats()
+	isMaster, _ := stats["is_master"].(bool)
+
+	var playlistContent string
+	if isMaster {
+		playlistContent = s.playlist.GenerateMaster()
+	} else {
+		playlistContent = s.playlist.Generate()
+	}
+
+	// Set HLS-specific headers
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Write the playlist
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(playlistContent))
+}
+
+// handleVariantPlaylist serves variant-specific media playlists.
+// Handles requests like /variant0/playlist.m3u8, /variant1/playlist.m3u8, etc.
+func (s *Server) handleVariantPlaylist(w http.ResponseWriter, r *http.Request) {
+	// Only handle variant paths
+	if !strings.HasPrefix(r.URL.Path, "/variant") || !strings.HasSuffix(r.URL.Path, "/playlist.m3u8") {
+		// Not a variant playlist request, return 404
+		http.NotFound(w, r)
+		return
+	}
+
+	// Parse variant index from path
+	// Path format: /variant{N}/playlist.m3u8
+	path := strings.TrimPrefix(r.URL.Path, "/variant")
+	path = strings.TrimSuffix(path, "/playlist.m3u8")
+
+	variantIndex, err := strconv.Atoi(path)
+	if err != nil {
+		http.Error(w, "Invalid variant index", http.StatusBadRequest)
+		return
+	}
+
+	// Generate variant-specific playlist
+	playlistContent, err := s.playlist.GenerateVariant(variantIndex)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to generate variant playlist: %v", err), http.StatusNotFound)
+		return
+	}
 
 	// Set HLS-specific headers
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
