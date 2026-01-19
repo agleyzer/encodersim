@@ -34,7 +34,7 @@ type Playlist interface {
 	StartAutoAdvance(ctx context.Context)
 
 	// GetStats returns current statistics about the playlist.
-	GetStats() map[string]interface{}
+	GetStats() map[string]any
 }
 
 // New creates a new media playlist.
@@ -201,11 +201,11 @@ func (mp *mediaPlaylist) StartAutoAdvance(ctx context.Context) {
 }
 
 // GetStats returns current statistics about the playlist.
-func (mp *mediaPlaylist) GetStats() map[string]interface{} {
+func (mp *mediaPlaylist) GetStats() map[string]any {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"is_master":        false,
 		"window_size":      mp.windowSize,
 		"sequence_number":  mp.sequenceNumber,
@@ -309,9 +309,9 @@ func (mvp *multiVariantPlaylist) StartAutoAdvance(ctx context.Context) {
 
 // GetStats returns current statistics about the playlist.
 // Includes per-variant statistics.
-func (mvp *multiVariantPlaylist) GetStats() map[string]interface{} {
+func (mvp *multiVariantPlaylist) GetStats() map[string]any {
 	// Build per-variant stats from each mediaPlaylist
-	variantStats := make([]map[string]interface{}, len(mvp.variants))
+	variantStats := make([]map[string]any, len(mvp.variants))
 	for i := range mvp.variants {
 		v := mvp.variants[i]
 		mp := mvp.variantPlaylists[i]
@@ -319,7 +319,7 @@ func (mvp *multiVariantPlaylist) GetStats() map[string]interface{} {
 		// Get stats from the mediaPlaylist
 		mpStats := mp.GetStats()
 
-		variantStats[i] = map[string]interface{}{
+		variantStats[i] = map[string]any{
 			"index":          i,
 			"bandwidth":      v.Bandwidth,
 			"resolution":     v.Resolution,
@@ -338,7 +338,7 @@ func (mvp *multiVariantPlaylist) GetStats() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"is_master":       true,
 		"window_size":     mvp.variantPlaylists[0].windowSize,
 		"sequence_number": mvp.variantPlaylists[0].sequenceNumber,

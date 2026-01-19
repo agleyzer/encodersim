@@ -129,7 +129,7 @@ func TestHandleHealth(t *testing.T) {
 	}
 
 	// Parse JSON response
-	var health map[string]interface{}
+	var health map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&health); err != nil {
 		t.Fatalf("Failed to parse JSON response: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestHandleHealth(t *testing.T) {
 	}
 
 	// Check stats contains expected fields
-	stats, ok := health["stats"].(map[string]interface{})
+	stats, ok := health["stats"].(map[string]any)
 	if !ok {
 		t.Fatal("Stats is not a map")
 	}
@@ -172,10 +172,10 @@ func TestHandleHealth_WithAdvancedPlaylist(t *testing.T) {
 
 	srv.handleHealth(w, req)
 
-	var health map[string]interface{}
+	var health map[string]any
 	json.NewDecoder(w.Body).Decode(&health)
 
-	stats := health["stats"].(map[string]interface{})
+	stats := health["stats"].(map[string]any)
 
 	// Check that position reflects advances
 	position := stats["current_position"].(float64)

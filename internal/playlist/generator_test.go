@@ -359,7 +359,7 @@ func TestNewMaster(t *testing.T) {
 	if stats["target_duration"].(int) != 10 {
 		t.Errorf("Expected target duration 10, got %d", stats["target_duration"])
 	}
-	variantStats := stats["variants"].([]map[string]interface{})
+	variantStats := stats["variants"].([]map[string]any)
 	if len(variantStats) != 3 {
 		t.Errorf("Expected 3 variant positions, got %d", len(variantStats))
 	}
@@ -542,7 +542,7 @@ func TestAdvance_MultiVariant(t *testing.T) {
 
 	// All variants should advance together
 	stats = lp.GetStats()
-	variantStats := stats["variants"].([]map[string]interface{})
+	variantStats := stats["variants"].([]map[string]any)
 	for i, vs := range variantStats {
 		if vs["position"].(int) != 1 {
 			t.Errorf("Expected variant %d position 1 after advance, got %d", i, vs["position"])
@@ -567,7 +567,7 @@ func TestAdvance_MultiVariant_Looping(t *testing.T) {
 
 	// All variants should wrap to position 0
 	stats := lp.GetStats()
-	variantStats := stats["variants"].([]map[string]interface{})
+	variantStats := stats["variants"].([]map[string]any)
 	for i, vs := range variantStats {
 		if vs["position"].(int) != 0 {
 			t.Errorf("Expected variant %d position to loop to 0, got %d", i, vs["position"])
@@ -608,7 +608,7 @@ func TestGetStats_MultiVariant(t *testing.T) {
 	}
 
 	// Check per-variant stats
-	variantStats, ok := stats["variants"].([]map[string]interface{})
+	variantStats, ok := stats["variants"].([]map[string]any)
 	if !ok {
 		t.Fatal("Expected variants array in stats")
 	}
@@ -679,7 +679,7 @@ func TestStartAutoAdvance_MultiVariant(t *testing.T) {
 
 	// All variants should have advanced
 	stats := lp.GetStats()
-	variantStats := stats["variants"].([]map[string]interface{})
+	variantStats := stats["variants"].([]map[string]any)
 	for i, vs := range variantStats {
 		if vs["position"].(int) < 2 {
 			t.Errorf("Expected variant %d position >= 2 after 2.5 seconds, got %d", i, vs["position"])

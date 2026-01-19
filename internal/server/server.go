@@ -130,7 +130,7 @@ func (s *Server) handleVariantPlaylist(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	stats := s.playlist.GetStats()
 
-	health := map[string]interface{}{
+	health := map[string]any{
 		"status": "ok",
 		"stats":  stats,
 	}
