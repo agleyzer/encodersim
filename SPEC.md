@@ -115,23 +115,49 @@ https://example.com/segment001.ts
 - Return JSON with status and statistics
 - Include fields:
   - `status`: "ok"
-  - `stats`: object with:
-    - `total_segments`: Total segments in source playlist
-    - `window_size`: Current window size
-    - `current_position`: Current position in source playlist
-    - `sequence_number`: Current media sequence number
-    - `target_duration`: Target duration in seconds
+  - `stats`: object with different fields based on playlist type
 
-**Example Response:**
+**Media Playlist Response:**
 ```json
 {
   "status": "ok",
   "stats": {
+    "is_master": false,
     "total_segments": 30,
     "window_size": 6,
     "current_position": 12,
     "sequence_number": 42,
     "target_duration": 10
+  }
+}
+```
+
+**Master Playlist Response:**
+```json
+{
+  "status": "ok",
+  "stats": {
+    "is_master": true,
+    "window_size": 6,
+    "sequence_number": 42,
+    "target_duration": 10,
+    "variant_count": 2,
+    "variants": [
+      {
+        "index": 0,
+        "bandwidth": 1280000,
+        "resolution": "640x360",
+        "total_segments": 30,
+        "position": 12
+      },
+      {
+        "index": 1,
+        "bandwidth": 2560000,
+        "resolution": "1280x720",
+        "total_segments": 30,
+        "position": 12
+      }
+    ]
   }
 }
 ```
@@ -484,16 +510,18 @@ EncoderSim supports HLS master playlists with multiple bitrate/quality variants.
 - Automatically detects master playlists during parsing
 - Fetches and parses all variant media playlists
 - Maintains separate sliding windows for each variant
-- Advances all variants synchronously
+- Each variant advances independently based on its own target duration
 - Generates compliant master playlist with `#EXT-X-STREAM-INF` tags
 
 **URL Structure:**
 - Master playlist: `GET /playlist.m3u8`
-- Variant playlists: `GET /variant0/playlist.m3u8`, `/variant1/playlist.m3u8`, etc.
+- Variant playlists: `GET /variant/0/playlist.m3u8`, `/variant/1/playlist.m3u8`, etc.
 - Health endpoint includes per-variant statistics
 
-**Synchronization:**
-- All variants advance together based on maximum target duration
+**Variant Management:**
+- Each variant runs its own independent auto-advance goroutine
+- Each variant advances based on its own target duration
+- Variants with the same target duration naturally stay synchronized
 - Each variant maintains independent discontinuity detection
 - Sliding windows wrap independently when variants have different lengths
 

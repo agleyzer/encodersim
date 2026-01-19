@@ -63,9 +63,9 @@ encodersim https://example.com/master.m3u8
 
 The tool auto-detects master playlists and serves:
 - **Master Playlist**: `http://localhost:8080/playlist.m3u8`
-- **Variant Playlists**: `http://localhost:8080/variant0/playlist.m3u8`, `/variant1/playlist.m3u8`, etc.
+- **Variant Playlists**: `http://localhost:8080/variant/0/playlist.m3u8`, `/variant/1/playlist.m3u8`, etc.
 
-All variants advance synchronously to maintain proper ABR streaming behavior.
+Each variant maintains its own sliding window and advances independently based on its target duration. When variants have the same target duration, they naturally stay synchronized.
 
 ### Limiting Content Duration
 
@@ -152,17 +152,42 @@ The `/health` endpoint returns JSON with current statistics:
 curl http://localhost:8080/health
 ```
 
-Response:
+**Media Playlist Response:**
 
 ```json
 {
   "status": "ok",
   "stats": {
+    "is_master": false,
     "total_segments": 30,
     "window_size": 6,
     "current_position": 12,
     "sequence_number": 42,
     "target_duration": 10
+  }
+}
+```
+
+**Master Playlist Response** (includes per-variant details):
+
+```json
+{
+  "status": "ok",
+  "stats": {
+    "is_master": true,
+    "window_size": 6,
+    "sequence_number": 42,
+    "target_duration": 10,
+    "variant_count": 2,
+    "variants": [
+      {
+        "index": 0,
+        "bandwidth": 1280000,
+        "resolution": "640x360",
+        "total_segments": 30,
+        "position": 12
+      }
+    ]
   }
 }
 ```
