@@ -10,6 +10,8 @@ EncoderSim is a command-line tool that converts static HLS playlists into contin
 - No segment downloading - uses original segment URLs
 - Health check endpoint for monitoring
 - Graceful shutdown support
+- **Cluster mode** with Raft consensus for high availability and load balancing
+- Multi-bitrate (master playlist) support
 - Clean, simple architecture
 
 ## How It Works
@@ -84,6 +86,105 @@ encodersim --loop-after 30s https://example.com/master.m3u8
 
 The tool will include segments up to the specified duration (at segment boundaries), allowing up to 50% overage to avoid cutting off mid-segment. This is useful for testing live streaming behavior with shorter content loops.
 
+### Cluster Mode (High Availability)
+
+EncoderSim supports running multiple instances in a cluster for high availability and load balancing. All instances serve identical playlists at the same time using Raft consensus.
+
+#### Running a 3-Node Cluster
+
+```bash
+# Node 1
+./encodersim --cluster \
+  --raft-id=node1 \
+  --raft-bind=10.0.0.1:9000 \
+  --peers=10.0.0.1:9000,10.0.0.2:9000,10.0.0.3:9000 \
+  --port=8080 \
+  https://example.com/playlist.m3u8
+
+# Node 2
+./encodersim --cluster \
+  --raft-id=node2 \
+  --raft-bind=10.0.0.2:9000 \
+  --peers=10.0.0.1:9000,10.0.0.2:9000,10.0.0.3:9000 \
+  --port=8080 \
+  https://example.com/playlist.m3u8
+
+# Node 3
+./encodersim --cluster \
+  --raft-id=node3 \
+  --raft-bind=10.0.0.3:9000 \
+  --peers=10.0.0.1:9000,10.0.0.2:9000,10.0.0.3:9000 \
+  --port=8080 \
+  https://example.com/playlist.m3u8
+```
+
+#### How Cluster Mode Works
+
+- **Raft Consensus**: One node is elected as the leader, which advances the sliding window
+- **State Replication**: Window position and sequence numbers are replicated to all nodes
+- **Identical Playlists**: All nodes serve the exact same playlist at any given moment
+- **Automatic Failover**: If the leader fails, a new leader is automatically elected
+- **Load Balancing**: Place a load balancer (nginx, HAProxy) in front of the cluster
+
+#### Cluster Mode Flags
+
+```
+-cluster
+      Enable cluster mode with Raft consensus
+-raft-id string
+      Unique Raft node ID (required for cluster mode)
+-raft-bind string
+      Raft bind address for inter-node communication (host:port, required for cluster mode)
+-peers string
+      Comma-separated list of all peer Raft addresses including this node (required for cluster mode)
+```
+
+#### Checking Cluster Status
+
+```bash
+# Check cluster status
+curl http://localhost:8080/cluster/status
+
+# Example response
+{
+  "cluster_enabled": true,
+  "is_leader": false,
+  "leader_address": "10.0.0.1:9000",
+  "raft_state": "Follower"
+}
+```
+
+#### Deploying Behind a Load Balancer
+
+**Nginx Example:**
+
+```nginx
+upstream encodersim {
+    server 10.0.0.1:8080;
+    server 10.0.0.2:8080;
+    server 10.0.0.3:8080;
+}
+
+server {
+    listen 80;
+    location / {
+        proxy_pass http://encodersim;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+}
+```
+
+**HAProxy Example:**
+
+```
+backend encodersim
+    balance roundrobin
+    server node1 10.0.0.1:8080 check
+    server node2 10.0.0.2:8080 check
+    server node3 10.0.0.3:8080 check
+```
+
 ### Command-Line Options
 
 ```
@@ -100,6 +201,14 @@ Options:
   -variants string
         Comma-separated list of variant indices to serve (e.g., '0,2,4')
         Serves all variants if not specified
+  -cluster
+        Enable cluster mode with Raft consensus
+  -raft-id string
+        Unique Raft node ID (required for cluster mode)
+  -raft-bind string
+        Raft bind address for inter-node communication (host:port, required for cluster mode)
+  -peers string
+        Comma-separated list of all peer Raft addresses including this node (required for cluster mode)
   -verbose
         Enable verbose logging
   -version
@@ -188,6 +297,26 @@ curl http://localhost:8080/health
         "position": 12
       }
     ]
+  }
+}
+```
+
+**Cluster Mode Response** (includes cluster information):
+
+```json
+{
+  "status": "ok",
+  "stats": {
+    "is_master": false,
+    "cluster_mode": true,
+    "is_leader": false,
+    "leader_address": "10.0.0.1:9000",
+    "raft_state": "Follower",
+    "total_segments": 30,
+    "window_size": 6,
+    "current_position": 12,
+    "sequence_number": 42,
+    "target_duration": 10
   }
 }
 ```

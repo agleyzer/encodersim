@@ -38,6 +38,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Register handlers
 	mux.HandleFunc("/playlist.m3u8", s.handlePlaylist)
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/cluster/status", s.handleClusterStatus)
 
 	// Register variant-specific handler (for master playlists)
 	// This catches requests like /variant/0/playlist.m3u8, /variant/1/playlist.m3u8, etc.
@@ -138,6 +139,30 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(health)
+}
+
+// handleClusterStatus serves cluster status information.
+func (s *Server) handleClusterStatus(w http.ResponseWriter, r *http.Request) {
+	stats := s.playlist.GetStats()
+
+	// Check if cluster mode is enabled
+	clusterEnabled, ok := stats["cluster_mode"].(bool)
+	if !ok || !clusterEnabled {
+		http.Error(w, "Cluster mode is not enabled", http.StatusNotImplemented)
+		return
+	}
+
+	// Extract cluster information from stats
+	clusterStatus := map[string]any{
+		"cluster_enabled": true,
+		"is_leader":       stats["is_leader"],
+		"leader_address":  stats["leader_address"],
+		"raft_state":      stats["raft_state"],
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(clusterStatus)
 }
 
 // loggingMiddleware logs HTTP requests.

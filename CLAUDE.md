@@ -74,11 +74,11 @@ go mod verify
 ### Component Overview
 
 1. **cmd/encodersim/main.go**: CLI entry point
-   - Parses command-line flags (port, window-size, loop-after, master, variants, verbose, version)
-   - Validates inputs (port 1-65535, window-size >= 1, loop-after positive duration)
+   - Parses command-line flags (port, window-size, loop-after, master, variants, cluster, raft-id, raft-bind, peers, verbose, version)
+   - Validates inputs (port 1-65535, window-size >= 1, loop-after positive duration, cluster flags)
    - Implements `calculateSegmentSubset()` for --loop-after functionality
    - Applies segment limiting to both media and master playlists
-   - Orchestrates component initialization
+   - Orchestrates component initialization (including cluster manager if enabled)
    - Manages graceful shutdown via signal handling
 
 2. **internal/parser**: HLS playlist fetching and parsing
@@ -100,28 +100,41 @@ go mod verify
    - `StartAutoAdvance()`: Goroutine that advances window based on target duration
    - `GetStats()`: Returns current state (per-variant in master mode)
    - **Discontinuity detection**: Automatically inserts `#EXT-X-DISCONTINUITY` tag when playlist loops back to start (per-variant in master mode)
+   - **Cluster support**: `NewClustered()` and `NewMasterClustered()` create cluster-aware playlists
 
-4. **internal/server**: HTTP server
+4. **internal/cluster**: Distributed state management (optional, cluster mode only)
+   - `Manager`: Manages Raft cluster for state synchronization
+   - `PlaylistFSM`: Raft FSM implementing state transitions
+   - `ClusterState`: Shared state (currentPosition, sequenceNumber, per-variant state)
+   - `Config`: Cluster configuration and validation
+   - Only leader advances state, followers replicate
+   - In-memory state store (no disk persistence)
+   - Uses hashicorp/raft library
+
+5. **internal/server**: HTTP server
    - `GET /playlist.m3u8`: Serves current live playlist (master or media)
    - `GET /variant0/playlist.m3u8`, `/variant1/playlist.m3u8`, etc.: Variant playlists (master mode only)
-   - `GET /health`: Returns JSON with statistics (per-variant in master mode)
+   - `GET /health`: Returns JSON with statistics (per-variant in master mode, includes cluster info if enabled)
+   - `GET /cluster/status`: Returns cluster status (cluster mode only)
    - Logging middleware for all requests
    - Graceful shutdown with 10-second timeout
 
-5. **internal/segment**: Shared data structures
+6. **internal/segment**: Shared data structures
    - `Segment` struct: URL, Duration, Sequence, VariantIndex
 
-6. **internal/variant**: Multi-variant data structures
+7. **internal/variant**: Multi-variant data structures
    - `Variant` struct: Bandwidth, Resolution, Codecs, PlaylistURL, Segments, TargetDuration
 
-7. **test/integration**: Integration test framework
+8. **test/integration**: Integration test framework
    - `TestHarness`: Manages test environment (HTTP server + encodersim binary)
+   - `ClusterTestHarness`: Manages multi-instance cluster tests
    - Automatically starts HTTP server serving test playlists
-   - Launches encodersim binary as subprocess
+   - Launches encodersim binary as subprocess (single or multiple instances)
    - Provides playlist parsing and verification helpers
    - `WaitForCondition()`: Polls until expected conditions are met
    - Tests verify end-to-end behavior including wrapping and discontinuity tags
    - Master playlist tests verify multi-variant synchronization
+   - Cluster tests verify state synchronization and leader election
 
 ### Key Design Patterns
 
@@ -229,6 +242,32 @@ curl http://localhost:8080/health
 - Tests:
   - Unit tests: `cmd/encodersim/main_test.go`
   - Integration test: `test/integration/integration_test.go::TestLoopAfterFlag`
+
+### Cluster mode (High Availability)
+- Location: `internal/cluster/`
+- Purpose: Enable multiple instances to serve identical playlists using Raft consensus
+- Components:
+  - `fsm.go`: Raft Finite State Machine for state management
+  - `cluster.go`: Cluster manager with Raft integration
+  - `config.go`: Cluster configuration and validation
+  - `logger.go`: Logging adapters for hashicorp/raft
+- State managed by Raft:
+  - `currentPosition`: Sliding window start index
+  - `sequenceNumber`: HLS media sequence number
+  - Per-variant state for master playlists
+- Testing:
+  - Unit tests: `internal/cluster/*_test.go`
+  - Integration tests: `test/integration/cluster_test.go`
+  - Run integration tests: `go test ./test/integration -v -run Cluster`
+- Key CLI flags:
+  - `--cluster`: Enable cluster mode
+  - `--raft-id`: Unique node identifier
+  - `--raft-bind`: Raft communication address
+  - `--peers`: Comma-separated list of all peer addresses
+- Debugging:
+  - Check cluster status: `curl http://localhost:8080/cluster/status`
+  - Health endpoint includes cluster info when enabled
+  - Leader advances window, followers replicate state
 
 ### Understanding HLS compliance
 - Version 3 required tags: `#EXTM3U`, `#EXT-X-VERSION:3`, `#EXT-X-TARGETDURATION`, `#EXT-X-MEDIA-SEQUENCE`
