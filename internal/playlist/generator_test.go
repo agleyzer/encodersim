@@ -425,9 +425,9 @@ func TestGenerateMaster(t *testing.T) {
 	variants := createTestVariants(2, 10)
 	lp, _ := NewMaster(variants, 6, logger)
 
-	playlist, err := lp.GenerateMaster()
+	playlist, err := lp.Generate()
 	if err != nil {
-		t.Fatalf("GenerateMaster() returned error: %v", err)
+		t.Fatalf("Generate() returned error: %v", err)
 	}
 
 	// Check for required master playlist tags
@@ -711,7 +711,7 @@ func TestConcurrentAccess_MultiVariant(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func() {
 			for j := 0; j < 50; j++ {
-				_, _ = lp.GenerateMaster()
+				_, _ = lp.Generate()
 				for k := 0; k < 3; k++ {
 					_, _ = lp.GenerateVariant(k)
 				}

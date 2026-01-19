@@ -71,15 +71,11 @@ func (s *Server) Start(ctx context.Context) error {
 // For media playlists, generates media playlist content.
 // For master playlists, generates master playlist content.
 func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
-	// Try to generate master playlist first, fall back to media playlist
-	playlistContent, err := s.playlist.GenerateMaster()
+	// Generate playlist (master or media depending on playlist type)
+	playlistContent, err := s.playlist.Generate()
 	if err != nil {
-		// Not a master playlist, generate media playlist
-		playlistContent, err = s.playlist.Generate()
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to generate playlist: %v", err), http.StatusInternalServerError)
-			return
-		}
+		http.Error(w, fmt.Sprintf("Failed to generate playlist: %v", err), http.StatusInternalServerError)
+		return
 	}
 
 	// Set HLS-specific headers
