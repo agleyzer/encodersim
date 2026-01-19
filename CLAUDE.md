@@ -6,6 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EncoderSim is a Go CLI tool that converts static HLS playlists into continuously looping live HLS feeds. It's designed as a standalone executable, NOT a library - all packages are under `internal/` and cannot be imported by external projects.
 
+## CRITICAL: Git Push Policy
+
+**NEVER run `git push` automatically without explicit user permission.**
+
+Before pushing to the remote repository:
+1. ALWAYS ask the user: "Ready to push to remote?"
+2. Wait for explicit confirmation
+3. Only then run `git push`
+
+This applies to:
+- All git push commands
+- Combined commands like `git commit && git push`
+- Scripts or workflows that include push operations
+
+**Rationale**: Pushing to remote is a permanent action that affects the shared repository. The user must have final control over when changes are published.
+
 ## Essential Commands
 
 ### Building and Running
