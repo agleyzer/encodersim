@@ -128,7 +128,7 @@ func run(playlistURL string, port, windowSize int, master bool, variants, loopAf
 	}
 
 	// Create the live playlist generator based on playlist type
-	var livePlaylist *playlist.LivePlaylist
+	var livePlaylist playlist.Playlist
 	if playlistInfo.IsMaster {
 		logger.Info("parsed master playlist",
 			"variants", len(playlistInfo.Variants),

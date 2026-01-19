@@ -21,7 +21,7 @@ func createTestLogger() *slog.Logger {
 	}))
 }
 
-func createTestPlaylist(t *testing.T) *playlist.LivePlaylist {
+func createTestPlaylist(t *testing.T) playlist.Playlist {
 	segments := []segment.Segment{
 		{URL: "https://example.com/seg1.ts", Duration: 10.0, Sequence: 0},
 		{URL: "https://example.com/seg2.ts", Duration: 10.0, Sequence: 1},

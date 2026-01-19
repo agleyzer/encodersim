@@ -27,8 +27,8 @@ func TestCalculateSegmentSubset(t *testing.T) {
 			wantTotal:   30.0,
 		},
 		{
-			name: "empty segments returns empty",
-			segments: []segment.Segment{},
+			name:        "empty segments returns empty",
+			segments:    []segment.Segment{},
 			maxDuration: 10 * time.Second,
 			wantCount:   0,
 			wantTotal:   0.0,

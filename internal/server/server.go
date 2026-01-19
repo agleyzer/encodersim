@@ -16,14 +16,14 @@ import (
 
 // Server serves the live HLS playlist.
 type Server struct {
-	playlist   *playlist.LivePlaylist
+	playlist   playlist.Playlist
 	port       int
 	logger     *slog.Logger
 	httpServer *http.Server
 }
 
 // New creates a new HTTP server.
-func New(lp *playlist.LivePlaylist, port int, logger *slog.Logger) *Server {
+func New(lp playlist.Playlist, port int, logger *slog.Logger) *Server {
 	return &Server{
 		playlist: lp,
 		port:     port,
@@ -71,15 +71,15 @@ func (s *Server) Start(ctx context.Context) error {
 // For media playlists, generates media playlist content.
 // For master playlists, generates master playlist content.
 func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
-	// Check playlist mode and generate appropriate content
-	stats := s.playlist.GetStats()
-	isMaster, _ := stats["is_master"].(bool)
-
-	var playlistContent string
-	if isMaster {
-		playlistContent = s.playlist.GenerateMaster()
-	} else {
-		playlistContent = s.playlist.Generate()
+	// Try to generate master playlist first, fall back to media playlist
+	playlistContent, err := s.playlist.GenerateMaster()
+	if err != nil {
+		// Not a master playlist, generate media playlist
+		playlistContent, err = s.playlist.Generate()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to generate playlist: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Set HLS-specific headers
