@@ -47,7 +47,8 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Create Raft configuration
 	raftConfig := raft.DefaultConfig()
-	raftConfig.LocalID = raft.ServerID(m.config.RaftID)
+	// Use bind address as LocalID for consistency with bootstrap configuration
+	raftConfig.LocalID = raft.ServerID(m.config.BindAddr)
 	raftConfig.HeartbeatTimeout = m.config.HeartbeatTimeout
 	raftConfig.ElectionTimeout = m.config.ElectionTimeout
 	raftConfig.LeaderLeaseTimeout = m.config.HeartbeatTimeout
@@ -103,7 +104,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		// Continue anyway - node might be joining existing cluster
 	}
 
-	m.logger.Info("cluster started", "id", m.config.RaftID, "bind", m.config.BindAddr, "peers", len(m.config.Peers))
+	m.logger.Info("cluster started",
+		"node_id", m.config.RaftID,
+		"raft_id", m.config.BindAddr,
+		"bind", m.config.BindAddr,
+		"peers", len(m.config.Peers))
 
 	return nil
 }
