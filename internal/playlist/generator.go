@@ -15,7 +15,7 @@ import (
 
 // Playlist defines the interface for HLS playlist generation.
 // Implementations include mediaPlaylist (single media playlist)
-// and masterPlaylist (multi-variant master playlist).
+// and multiVariantPlaylist (multi-variant master playlist).
 type Playlist interface {
 	// Generate creates an HLS playlist.
 	// For media playlists, returns the media playlist content.
@@ -103,7 +103,7 @@ func NewMaster(variants []variant.Variant, windowSize int, logger *slog.Logger) 
 	// Initialize per-variant positions to 0
 	variantPos := make([]int, len(variants))
 
-	return &masterPlaylist{
+	return &multiVariantPlaylist{
 		variants:       variants,
 		variantPos:     variantPos,
 		windowSize:     windowSize,
@@ -239,8 +239,10 @@ func (mp *mediaPlaylist) getCurrentWindow() []segment.Segment {
 	return window
 }
 
-// masterPlaylist manages a sliding window for a multi-variant master playlist.
-type masterPlaylist struct {
+// multiVariantPlaylist manages a sliding window for a multi-variant master playlist.
+// It generates both the master playlist (with variant links) and individual variant
+// media playlists.
+type multiVariantPlaylist struct {
 	mu             sync.RWMutex
 	variants       []variant.Variant
 	variantPos     []int // Per-variant current positions
@@ -252,14 +254,14 @@ type masterPlaylist struct {
 
 // Generate creates an HLS master playlist (convenience method).
 // Delegates to GenerateMaster() for consistency.
-func (mp *masterPlaylist) Generate() (string, error) {
-	return mp.GenerateMaster()
+func (mvp *multiVariantPlaylist) Generate() (string, error) {
+	return mvp.GenerateMaster()
 }
 
 // GenerateMaster creates an HLS master playlist with variant streams.
-func (mp *masterPlaylist) GenerateMaster() (string, error) {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
+func (mvp *multiVariantPlaylist) GenerateMaster() (string, error) {
+	mvp.mu.RLock()
+	defer mvp.mu.RUnlock()
 
 	var b strings.Builder
 
@@ -268,7 +270,7 @@ func (mp *masterPlaylist) GenerateMaster() (string, error) {
 	b.WriteString("#EXT-X-VERSION:3\n")
 
 	// Write variant streams
-	for i, v := range mp.variants {
+	for i, v := range mvp.variants {
 		// Build #EXT-X-STREAM-INF attributes
 		b.WriteString("#EXT-X-STREAM-INF:")
 		b.WriteString(fmt.Sprintf("BANDWIDTH=%d", v.Bandwidth))
@@ -291,16 +293,16 @@ func (mp *masterPlaylist) GenerateMaster() (string, error) {
 }
 
 // GenerateVariant creates an HLS media playlist for a specific variant.
-func (mp *masterPlaylist) GenerateVariant(variantIndex int) (string, error) {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
+func (mvp *multiVariantPlaylist) GenerateVariant(variantIndex int) (string, error) {
+	mvp.mu.RLock()
+	defer mvp.mu.RUnlock()
 
-	if variantIndex < 0 || variantIndex >= len(mp.variants) {
-		return "", fmt.Errorf("variant index %d out of range (0-%d)", variantIndex, len(mp.variants)-1)
+	if variantIndex < 0 || variantIndex >= len(mvp.variants) {
+		return "", fmt.Errorf("variant index %d out of range (0-%d)", variantIndex, len(mvp.variants)-1)
 	}
 
-	variant := mp.variants[variantIndex]
-	variantPos := mp.variantPos[variantIndex]
+	variant := mvp.variants[variantIndex]
+	variantPos := mvp.variantPos[variantIndex]
 
 	var b strings.Builder
 
@@ -308,10 +310,10 @@ func (mp *masterPlaylist) GenerateVariant(variantIndex int) (string, error) {
 	b.WriteString("#EXTM3U\n")
 	b.WriteString("#EXT-X-VERSION:3\n")
 	b.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", variant.TargetDuration))
-	b.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", mp.sequenceNumber))
+	b.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", mvp.sequenceNumber))
 
 	// Get current window of segments for this variant
-	windowSegments := mp.getCurrentWindowForVariant(variantIndex, variantPos, variant.Segments)
+	windowSegments := mvp.getCurrentWindowForVariant(variantPos, variant.Segments)
 
 	// Write segments with discontinuity detection
 	for i, seg := range windowSegments {
@@ -333,35 +335,35 @@ func (mp *masterPlaylist) GenerateVariant(variantIndex int) (string, error) {
 }
 
 // Advance moves the sliding window forward by one segment for all variants.
-func (mp *masterPlaylist) Advance() {
-	mp.mu.Lock()
-	defer mp.mu.Unlock()
+func (mvp *multiVariantPlaylist) Advance() {
+	mvp.mu.Lock()
+	defer mvp.mu.Unlock()
 
 	// Advance all variants synchronously
-	for i := range mp.variants {
-		totalSegments := len(mp.variants[i].Segments)
-		mp.variantPos[i] = (mp.variantPos[i] + 1) % totalSegments
+	for i := range mvp.variants {
+		totalSegments := len(mvp.variants[i].Segments)
+		mvp.variantPos[i] = (mvp.variantPos[i] + 1) % totalSegments
 	}
 
-	mp.sequenceNumber++
+	mvp.sequenceNumber++
 
-	mp.logger.Debug("advanced all variant windows",
-		"variants", len(mp.variants),
-		"sequence", mp.sequenceNumber,
+	mvp.logger.Debug("advanced all variant windows",
+		"variants", len(mvp.variants),
+		"sequence", mvp.sequenceNumber,
 	)
 }
 
 // StartAutoAdvance starts a goroutine that automatically advances the window
 // based on the target duration.
 // Uses the maximum target duration across all variants.
-func (mp *masterPlaylist) StartAutoAdvance(ctx context.Context) {
+func (mvp *multiVariantPlaylist) StartAutoAdvance(ctx context.Context) {
 	// Use target duration as the advancement interval
-	interval := time.Duration(mp.targetDuration) * time.Second
+	interval := time.Duration(mvp.targetDuration) * time.Second
 
-	mp.logger.Info("starting auto-advance",
+	mvp.logger.Info("starting auto-advance",
 		"interval", interval,
-		"windowSize", mp.windowSize,
-		"variantCount", len(mp.variants),
+		"windowSize", mvp.windowSize,
+		"variantCount", len(mvp.variants),
 	)
 
 	ticker := time.NewTicker(interval)
@@ -370,47 +372,48 @@ func (mp *masterPlaylist) StartAutoAdvance(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			mp.logger.Info("stopping auto-advance")
+			mvp.logger.Info("stopping auto-advance")
 			return
 		case <-ticker.C:
-			mp.Advance()
+			mvp.Advance()
 		}
 	}
 }
 
 // GetStats returns current statistics about the playlist.
 // Includes per-variant statistics.
-func (mp *masterPlaylist) GetStats() map[string]interface{} {
-	mp.mu.RLock()
-	defer mp.mu.RUnlock()
+func (mvp *multiVariantPlaylist) GetStats() map[string]interface{} {
+	mvp.mu.RLock()
+	defer mvp.mu.RUnlock()
 
 	// Build per-variant stats
-	variantStats := make([]map[string]interface{}, len(mp.variants))
-	for i, v := range mp.variants {
+	variantStats := make([]map[string]interface{}, len(mvp.variants))
+	for i, v := range mvp.variants {
 		variantStats[i] = map[string]interface{}{
 			"index":          i,
 			"bandwidth":      v.Bandwidth,
 			"resolution":     v.Resolution,
 			"total_segments": len(v.Segments),
-			"position":       mp.variantPos[i],
+			"position":       mvp.variantPos[i],
 		}
 	}
 
 	return map[string]interface{}{
 		"is_master":       true,
-		"window_size":     mp.windowSize,
-		"sequence_number": mp.sequenceNumber,
-		"target_duration": mp.targetDuration,
+		"window_size":     mvp.windowSize,
+		"sequence_number": mvp.sequenceNumber,
+		"target_duration": mvp.targetDuration,
 		"variants":        variantStats,
-		"variant_count":   len(mp.variants),
+		"variant_count":   len(mvp.variants),
 	}
 }
 
 // getCurrentWindowForVariant returns the current window of segments for a specific variant.
+// Window size is clamped to the variant's segment count if necessary.
 // Caller must hold at least a read lock.
-func (mp *masterPlaylist) getCurrentWindowForVariant(variantIndex, position int, segments []segment.Segment) []segment.Segment {
+func (mvp *multiVariantPlaylist) getCurrentWindowForVariant(position int, segments []segment.Segment) []segment.Segment {
 	totalSegments := len(segments)
-	effectiveWindowSize := mp.windowSize
+	effectiveWindowSize := mvp.windowSize
 	if effectiveWindowSize > totalSegments {
 		effectiveWindowSize = totalSegments
 	}
