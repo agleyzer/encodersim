@@ -90,8 +90,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	for _, peer := range m.config.Peers {
 		// Use peer address as both ID and address for simplicity
 		configuration.Servers = append(configuration.Servers, raft.Server{
-			ID:      raft.ServerID(peer),
-			Address: raft.ServerAddress(peer),
+			ID:       raft.ServerID(peer),
+			Address:  raft.ServerAddress(peer),
+			Suffrage: raft.Voter,
 		})
 	}
 
