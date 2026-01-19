@@ -130,8 +130,8 @@ func (mp *mediaPlaylist) Generate() (string, error) {
 	// HLS playlist header
 	b.WriteString("#EXTM3U\n")
 	b.WriteString("#EXT-X-VERSION:3\n")
-	b.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", mp.targetDuration))
-	b.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", mp.sequenceNumber))
+	fmt.Fprintf(&b, "#EXT-X-TARGETDURATION:%d\n", mp.targetDuration)
+	fmt.Fprintf(&b, "#EXT-X-MEDIA-SEQUENCE:%d\n", mp.sequenceNumber)
 
 	// Get current window of segments
 	windowSegments := mp.getCurrentWindow()
@@ -145,7 +145,7 @@ func (mp *mediaPlaylist) Generate() (string, error) {
 			b.WriteString("#EXT-X-DISCONTINUITY\n")
 		}
 
-		b.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", seg.Duration))
+		fmt.Fprintf(&b, "#EXTINF:%.3f,\n", seg.Duration)
 		b.WriteString(seg.URL)
 		b.WriteString("\n")
 	}
@@ -251,20 +251,20 @@ func (mvp *multiVariantPlaylist) Generate() (string, error) {
 	for i, v := range mvp.variants {
 		// Build #EXT-X-STREAM-INF attributes
 		b.WriteString("#EXT-X-STREAM-INF:")
-		b.WriteString(fmt.Sprintf("BANDWIDTH=%d", v.Bandwidth))
+		fmt.Fprintf(&b, "BANDWIDTH=%d", v.Bandwidth)
 
 		if v.Resolution != "" {
-			b.WriteString(fmt.Sprintf(",RESOLUTION=%s", v.Resolution))
+			fmt.Fprintf(&b, ",RESOLUTION=%s", v.Resolution)
 		}
 
 		if v.Codecs != "" {
-			b.WriteString(fmt.Sprintf(",CODECS=\"%s\"", v.Codecs))
+			fmt.Fprintf(&b, ",CODECS=\"%s\"", v.Codecs)
 		}
 
 		b.WriteString("\n")
 
 		// Write variant playlist URL
-		b.WriteString(fmt.Sprintf("/variant/%d/playlist.m3u8\n", i))
+		fmt.Fprintf(&b, "/variant/%d/playlist.m3u8\n", i)
 	}
 
 	return b.String(), nil
