@@ -450,10 +450,10 @@ func TestGenerateMaster(t *testing.T) {
 	}
 
 	// Check for variant playlist URLs
-	if !strings.Contains(playlist, "/variant0/playlist.m3u8") {
+	if !strings.Contains(playlist, "/variant/0/playlist.m3u8") {
 		t.Error("Master playlist missing variant 0 URL")
 	}
-	if !strings.Contains(playlist, "/variant1/playlist.m3u8") {
+	if !strings.Contains(playlist, "/variant/1/playlist.m3u8") {
 		t.Error("Master playlist missing variant 1 URL")
 	}
 

@@ -264,7 +264,7 @@ func (mvp *multiVariantPlaylist) Generate() (string, error) {
 		b.WriteString("\n")
 
 		// Write variant playlist URL
-		b.WriteString(fmt.Sprintf("/variant%d/playlist.m3u8\n", i))
+		b.WriteString(fmt.Sprintf("/variant/%d/playlist.m3u8\n", i))
 	}
 
 	return b.String(), nil

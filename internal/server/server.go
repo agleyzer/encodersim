@@ -40,8 +40,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/health", s.handleHealth)
 
 	// Register variant-specific handler (for master playlists)
-	// This catches requests like /variant0/playlist.m3u8, /variant1/playlist.m3u8, etc.
-	mux.HandleFunc("/", s.handleVariantPlaylist)
+	// This catches requests like /variant/0/playlist.m3u8, /variant/1/playlist.m3u8, etc.
+	mux.HandleFunc("/variant/", s.handleVariantPlaylist)
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
@@ -89,18 +89,18 @@ func (s *Server) handlePlaylist(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleVariantPlaylist serves variant-specific media playlists.
-// Handles requests like /variant0/playlist.m3u8, /variant1/playlist.m3u8, etc.
+// Handles requests like /variant/0/playlist.m3u8, /variant/1/playlist.m3u8, etc.
 func (s *Server) handleVariantPlaylist(w http.ResponseWriter, r *http.Request) {
-	// Only handle variant paths
-	if !strings.HasPrefix(r.URL.Path, "/variant") || !strings.HasSuffix(r.URL.Path, "/playlist.m3u8") {
+	// Only handle variant paths with correct format
+	if !strings.HasSuffix(r.URL.Path, "/playlist.m3u8") {
 		// Not a variant playlist request, return 404
 		http.NotFound(w, r)
 		return
 	}
 
 	// Parse variant index from path
-	// Path format: /variant{N}/playlist.m3u8
-	path := strings.TrimPrefix(r.URL.Path, "/variant")
+	// Path format: /variant/{N}/playlist.m3u8
+	path := strings.TrimPrefix(r.URL.Path, "/variant/")
 	path = strings.TrimSuffix(path, "/playlist.m3u8")
 
 	variantIndex, err := strconv.Atoi(path)
