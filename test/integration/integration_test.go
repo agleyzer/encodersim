@@ -226,11 +226,11 @@ func TestMasterPlaylist(t *testing.T) {
 	}
 
 	// Should have variant playlist URLs
-	if !strings.Contains(playlist, "/variant0/playlist.m3u8") {
-		t.Error("master playlist should contain variant0 URL")
+	if !strings.Contains(playlist, "/variant/0/playlist.m3u8") {
+		t.Error("master playlist should contain variant 0 URL")
 	}
-	if !strings.Contains(playlist, "/variant1/playlist.m3u8") {
-		t.Error("master playlist should contain variant1 URL")
+	if !strings.Contains(playlist, "/variant/1/playlist.m3u8") {
+		t.Error("master playlist should contain variant 1 URL")
 	}
 
 	// Should have bandwidth info

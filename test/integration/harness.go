@@ -171,7 +171,7 @@ func (h *TestHarness) FetchPlaylist() string {
 func (h *TestHarness) FetchVariantPlaylist(variantIndex int) string {
 	h.t.Helper()
 
-	url := fmt.Sprintf("http://localhost:%d/variant%d/playlist.m3u8", h.encodersimPort, variantIndex)
+	url := fmt.Sprintf("http://localhost:%d/variant/%d/playlist.m3u8", h.encodersimPort, variantIndex)
 	resp, err := http.Get(url)
 	if err != nil {
 		h.t.Fatalf("failed to fetch variant %d playlist: %v", variantIndex, err)
