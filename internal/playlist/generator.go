@@ -128,8 +128,8 @@ func (mp *mediaPlaylist) Generate() (string, error) {
 	var b strings.Builder
 
 	// HLS playlist header
-	b.WriteString("#EXTM3U\n")
-	b.WriteString("#EXT-X-VERSION:3\n")
+	fmt.Fprintln(&b, "#EXTM3U")
+	fmt.Fprintln(&b, "#EXT-X-VERSION:3")
 	fmt.Fprintf(&b, "#EXT-X-TARGETDURATION:%d\n", mp.targetDuration)
 	fmt.Fprintf(&b, "#EXT-X-MEDIA-SEQUENCE:%d\n", mp.sequenceNumber)
 
@@ -142,12 +142,11 @@ func (mp *mediaPlaylist) Generate() (string, error) {
 		// If this segment's sequence is less than the previous segment's,
 		// we've wrapped around to the beginning
 		if i > 0 && seg.Sequence < windowSegments[i-1].Sequence {
-			b.WriteString("#EXT-X-DISCONTINUITY\n")
+			fmt.Fprintln(&b, "#EXT-X-DISCONTINUITY")
 		}
 
 		fmt.Fprintf(&b, "#EXTINF:%.3f,\n", seg.Duration)
-		b.WriteString(seg.URL)
-		b.WriteString("\n")
+		fmt.Fprintln(&b, seg.URL)
 	}
 
 	// NOTE: We do NOT include #EXT-X-ENDLIST because this is a live stream
@@ -244,13 +243,13 @@ func (mvp *multiVariantPlaylist) Generate() (string, error) {
 	var b strings.Builder
 
 	// HLS master playlist header
-	b.WriteString("#EXTM3U\n")
-	b.WriteString("#EXT-X-VERSION:3\n")
+	fmt.Fprintln(&b, "#EXTM3U")
+	fmt.Fprintln(&b, "#EXT-X-VERSION:3")
 
 	// Write variant streams
 	for i, v := range mvp.variants {
 		// Build #EXT-X-STREAM-INF attributes
-		b.WriteString("#EXT-X-STREAM-INF:")
+		fmt.Fprint(&b, "#EXT-X-STREAM-INF:")
 		fmt.Fprintf(&b, "BANDWIDTH=%d", v.Bandwidth)
 
 		if v.Resolution != "" {
@@ -261,7 +260,7 @@ func (mvp *multiVariantPlaylist) Generate() (string, error) {
 			fmt.Fprintf(&b, ",CODECS=\"%s\"", v.Codecs)
 		}
 
-		b.WriteString("\n")
+		fmt.Fprintln(&b)
 
 		// Write variant playlist URL
 		fmt.Fprintf(&b, "/variant/%d/playlist.m3u8\n", i)
