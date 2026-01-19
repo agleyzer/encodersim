@@ -12,6 +12,9 @@
 # Output of the go coverage tool
 *.out
 
+# Cluster node logs
+node*.log
+
 # Go workspace file
 go.work
 

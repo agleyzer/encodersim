@@ -151,7 +151,6 @@ echo "Logs: node1.log, node2.log, node3.log"
 echo ""
 echo -e "${YELLOW}Press Ctrl+C to stop the cluster${NC}"
 
-# Wait for any node to exit
-wait -n $NODE1_PID $NODE2_PID $NODE3_PID
+wait $NODE1_PID $NODE2_PID $NODE3_PID
 
-echo -e "${RED}A node has exited unexpectedly${NC}"
+echo -e "${RED}All done${NC}"

@@ -135,14 +135,19 @@ func NewClustered(segments []segment.Segment, windowSize, targetDuration int, cl
 		logger:          logger,
 	}
 
-	// Initialize cluster state
-	initState := cluster.ClusterState{
-		CurrentPosition: 0,
-		SequenceNumber:  0,
-		TotalSegments:   len(segments),
-	}
-	if err := clusterMgr.Initialize(initState); err != nil {
-		return nil, fmt.Errorf("initialize cluster state: %w", err)
+	// Initialize cluster state (only if this node is the leader)
+	if clusterMgr.IsLeader() {
+		initState := cluster.ClusterState{
+			CurrentPosition: 0,
+			SequenceNumber:  0,
+			TotalSegments:   len(segments),
+		}
+		if err := clusterMgr.Initialize(initState); err != nil {
+			return nil, fmt.Errorf("initialize cluster state: %w", err)
+		}
+		logger.Info("initialized cluster state", "total_segments", len(segments))
+	} else {
+		logger.Info("skipping cluster state initialization (not leader)")
 	}
 
 	return &clusteredPlaylist{
@@ -202,12 +207,17 @@ func NewMasterClustered(variants []variant.Variant, windowSize int, clusterMgr *
 		}
 	}
 
-	// Initialize cluster state with all variants
-	initState := cluster.ClusterState{
-		Variants: variantStates,
-	}
-	if err := clusterMgr.Initialize(initState); err != nil {
-		return nil, fmt.Errorf("initialize cluster state: %w", err)
+	// Initialize cluster state with all variants (only if this node is the leader)
+	if clusterMgr.IsLeader() {
+		initState := cluster.ClusterState{
+			Variants: variantStates,
+		}
+		if err := clusterMgr.Initialize(initState); err != nil {
+			return nil, fmt.Errorf("initialize cluster state: %w", err)
+		}
+		logger.Info("initialized cluster state", "variants", len(variantStates))
+	} else {
+		logger.Info("skipping cluster state initialization (not leader)")
 	}
 
 	base := &multiVariantPlaylist{
