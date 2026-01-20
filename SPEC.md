@@ -117,22 +117,7 @@ https://example.com/segment001.ts
   - `status`: "ok"
   - `stats`: object with different fields based on playlist type
 
-**Media Playlist Response:**
-```json
-{
-  "status": "ok",
-  "stats": {
-    "is_master": false,
-    "total_segments": 30,
-    "window_size": 6,
-    "current_position": 12,
-    "sequence_number": 42,
-    "target_duration": 10
-  }
-}
-```
-
-**Master Playlist Response:**
+**Response** (always includes variant information):
 ```json
 {
   "status": "ok",
@@ -161,6 +146,8 @@ https://example.com/segment001.ts
   }
 }
 ```
+
+Note: Single media playlists are wrapped as single-variant, so `is_master` is always `true` and `variant_count` is at least 1.
 
 ### 8. Command-Line Interface
 
@@ -502,15 +489,21 @@ The project is considered complete when:
 7. ✅ Tool works with real-world HLS playlists
 8. ✅ No known critical bugs
 
-## Multi-Variant Playlist Support
+## Unified Playlist Architecture
 
-EncoderSim supports HLS master playlists with multiple bitrate/quality variants.
+EncoderSim uses a unified multi-variant architecture for all playlists.
 
-**Master Playlist Mode:**
+**Design:**
+- All playlists are internally represented as multi-variant
+- Single media playlists are automatically wrapped as single-variant (variant 0)
+- This simplifies the codebase with a single code path for all playlist types
+- The `Playlist` struct is the only public type (no interface)
+
+**Master Playlist Support:**
 - Automatically detects master playlists during parsing
 - Fetches and parses all variant media playlists
 - Maintains separate sliding windows for each variant
-- Each variant advances independently based on its own target duration
+- All variants advance together based on maximum target duration
 - Generates compliant master playlist with `#EXT-X-STREAM-INF` tags
 
 **URL Structure:**
@@ -519,11 +512,10 @@ EncoderSim supports HLS master playlists with multiple bitrate/quality variants.
 - Health endpoint includes per-variant statistics
 
 **Variant Management:**
-- Each variant runs its own independent auto-advance goroutine
-- Each variant advances based on its own target duration
-- Variants with the same target duration naturally stay synchronized
+- All variants advance synchronously using maximum target duration
 - Each variant maintains independent discontinuity detection
-- Sliding windows wrap independently when variants have different lengths
+- Sliding windows wrap independently when variants have different segment counts
+- Cluster support is optional (pass nil for standalone mode)
 
 ## Loop-After Feature
 

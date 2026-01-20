@@ -205,95 +205,64 @@ func run(playlistURL string, port, windowSize int, master bool, variants, loopAf
 		)
 	}
 
-	// Create the live playlist generator based on playlist type
-	var livePlaylist playlist.Playlist
+	// Build variants slice - either from master playlist or by wrapping single media playlist
+	var playlistVariants []variant.Variant
+
 	if playlistInfo.IsMaster {
 		logger.Info("parsed master playlist",
 			"variants", len(playlistInfo.Variants),
 			"targetDuration", playlistInfo.TargetDuration,
 		)
-
-		// Apply loop-after to each variant if specified
-		variants := playlistInfo.Variants
-		if loopAfterDuration > 0 {
-			// Create a copy of variants with subset segments
-			variantsWithSubset := make([]variant.Variant, len(variants))
-			for i, v := range variants {
-				variantsWithSubset[i] = v
-				variantsWithSubset[i].Segments = calculateSegmentSubset(v.Segments, loopAfterDuration)
-				logger.Info("applied loop-after to variant",
-					"variantIndex", i,
-					"originalSegments", len(v.Segments),
-					"includedSegments", len(variantsWithSubset[i].Segments),
-					"duration", loopAfterDuration,
-				)
-			}
-			variants = variantsWithSubset
-		}
-
-		// Log variant details
-		for i, v := range variants {
-			logger.Info("variant",
-				"index", i,
-				"bandwidth", v.Bandwidth,
-				"resolution", v.Resolution,
-				"segments", len(v.Segments),
-			)
-		}
-
-		if clusterMode {
-			livePlaylist, err = playlist.NewMasterClustered(
-				variants,
-				windowSize,
-				clusterMgr,
-				logger,
-			)
-		} else {
-			livePlaylist, err = playlist.NewMaster(
-				variants,
-				windowSize,
-				logger,
-			)
-		}
-		if err != nil {
-			return fmt.Errorf("failed to create live master playlist: %w", err)
-		}
+		playlistVariants = playlistInfo.Variants
 	} else {
 		logger.Info("parsed media playlist",
 			"segments", len(playlistInfo.Segments),
 			"targetDuration", playlistInfo.TargetDuration,
 		)
 
-		// Apply loop-after if specified
-		segments := playlistInfo.Segments
-		if loopAfterDuration > 0 {
-			segments = calculateSegmentSubset(playlistInfo.Segments, loopAfterDuration)
-			logger.Info("applied loop-after to media playlist",
-				"originalSegments", len(playlistInfo.Segments),
-				"includedSegments", len(segments),
+		// Wrap single media playlist as a single variant
+		playlistVariants = []variant.Variant{
+			{
+				Bandwidth:      0, // Unknown for single media playlist
+				Resolution:     "",
+				Codecs:         "",
+				PlaylistURL:    playlistURL,
+				Segments:       playlistInfo.Segments,
+				TargetDuration: playlistInfo.TargetDuration,
+			},
+		}
+	}
+
+	// Apply loop-after to each variant if specified
+	if loopAfterDuration > 0 {
+		variantsWithSubset := make([]variant.Variant, len(playlistVariants))
+		for i, v := range playlistVariants {
+			variantsWithSubset[i] = v
+			variantsWithSubset[i].Segments = calculateSegmentSubset(v.Segments, loopAfterDuration)
+			logger.Info("applied loop-after to variant",
+				"variantIndex", i,
+				"originalSegments", len(v.Segments),
+				"includedSegments", len(variantsWithSubset[i].Segments),
 				"duration", loopAfterDuration,
 			)
 		}
+		playlistVariants = variantsWithSubset
+	}
 
-		if clusterMode {
-			livePlaylist, err = playlist.NewClustered(
-				segments,
-				windowSize,
-				playlistInfo.TargetDuration,
-				clusterMgr,
-				logger,
-			)
-		} else {
-			livePlaylist, err = playlist.New(
-				segments,
-				windowSize,
-				playlistInfo.TargetDuration,
-				logger,
-			)
-		}
-		if err != nil {
-			return fmt.Errorf("failed to create live playlist: %w", err)
-		}
+	// Log variant details
+	for i, v := range playlistVariants {
+		logger.Info("variant",
+			"index", i,
+			"bandwidth", v.Bandwidth,
+			"resolution", v.Resolution,
+			"segments", len(v.Segments),
+		)
+	}
+
+	// Create the live playlist
+	livePlaylist, err := playlist.New(playlistVariants, windowSize, clusterMgr, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create live playlist: %w", err)
 	}
 
 	// Create context for graceful shutdown
@@ -326,30 +295,17 @@ func run(playlistURL string, port, windowSize int, master bool, variants, loopAf
 	// Create and start the HTTP server
 	srv := server.New(livePlaylist, port, logger)
 
-	if playlistInfo.IsMaster {
-		logMsg := "live HLS stream ready (master playlist mode)"
-		logArgs := []any{
-			"master_url", fmt.Sprintf("http://localhost:%d/playlist.m3u8", port),
-			"health", fmt.Sprintf("http://localhost:%d/health", port),
-			"variants", len(playlistInfo.Variants),
-		}
-		if clusterMode {
-			logMsg += " (cluster mode)"
-			logArgs = append(logArgs, "cluster_status", fmt.Sprintf("http://localhost:%d/cluster/status", port))
-		}
-		logger.Info(logMsg, logArgs...)
-	} else {
-		logMsg := "live HLS stream ready"
-		logArgs := []any{
-			"url", fmt.Sprintf("http://localhost:%d/playlist.m3u8", port),
-			"health", fmt.Sprintf("http://localhost:%d/health", port),
-		}
-		if clusterMode {
-			logMsg += " (cluster mode)"
-			logArgs = append(logArgs, "cluster_status", fmt.Sprintf("http://localhost:%d/cluster/status", port))
-		}
-		logger.Info(logMsg, logArgs...)
+	logMsg := "live HLS stream ready"
+	logArgs := []any{
+		"master_url", fmt.Sprintf("http://localhost:%d/playlist.m3u8", port),
+		"health", fmt.Sprintf("http://localhost:%d/health", port),
+		"variants", len(playlistVariants),
 	}
+	if clusterMode {
+		logMsg += " (cluster mode)"
+		logArgs = append(logArgs, "cluster_status", fmt.Sprintf("http://localhost:%d/cluster/status", port))
+	}
+	logger.Info(logMsg, logArgs...)
 
 	// Start server (blocks until shutdown)
 	return srv.Start(ctx)

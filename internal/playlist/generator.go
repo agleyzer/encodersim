@@ -14,153 +14,22 @@ import (
 	"github.com/agleyzer/encodersim/internal/variant"
 )
 
-// Playlist defines the interface for HLS playlist generation.
-// Implementations include mediaPlaylist (single media playlist)
-// and multiVariantPlaylist (multi-variant master playlist).
-type Playlist interface {
-	// Generate creates an HLS playlist.
-	// For media playlists, returns the media playlist content.
-	// For master playlists, returns the master playlist content.
-	Generate() (string, error)
-
-	// GenerateVariant creates an HLS media playlist for a specific variant.
-	// Returns an error if called on a non-master playlist or if variant index is invalid.
-	GenerateVariant(variantIndex int) (string, error)
-
-	// Advance moves the sliding window forward by one segment.
-	Advance()
-
-	// StartAutoAdvance starts a goroutine that automatically advances the window
-	// based on the target duration.
-	StartAutoAdvance(ctx context.Context)
-
-	// GetStats returns current statistics about the playlist.
-	GetStats() map[string]any
+// Playlist manages a multi-variant HLS playlist with sliding window support.
+// It generates both the master playlist (with variant links) and individual variant
+// media playlists. For single media playlists, wrap them in a single-variant structure.
+type Playlist struct {
+	variants         []variant.Variant // Metadata for master playlist generation
+	variantPlaylists []*mediaPlaylist  // One mediaPlaylist per variant
+	clusterMgr       *cluster.Manager  // Optional: nil for non-clustered mode
+	logger           *slog.Logger
 }
 
-// New creates a new media playlist.
-func New(segments []segment.Segment, windowSize, targetDuration int, logger *slog.Logger) (Playlist, error) {
-	if len(segments) == 0 {
-		return nil, fmt.Errorf("cannot create playlist with zero segments")
-	}
-
-	if windowSize <= 0 {
-		return nil, fmt.Errorf("window size must be positive")
-	}
-
-	if windowSize > len(segments) {
-		windowSize = len(segments)
-		logger.Warn("window size larger than segment count, using all segments", "windowSize", windowSize)
-	}
-
-	return &mediaPlaylist{
-		segments:        segments,
-		windowSize:      windowSize,
-		currentPosition: 0,
-		sequenceNumber:  0,
-		targetDuration:  targetDuration,
-		logger:          logger,
-	}, nil
-}
-
-// NewMaster creates a new master playlist with multiple variants.
-func NewMaster(variants []variant.Variant, windowSize int, logger *slog.Logger) (Playlist, error) {
+// New creates a new multi-variant playlist.
+// For single media playlists, wrap them in a variant.Variant slice first.
+// Use clusterMgr=nil for non-clustered mode.
+func New(variants []variant.Variant, windowSize int, clusterMgr *cluster.Manager, logger *slog.Logger) (*Playlist, error) {
 	if len(variants) == 0 {
-		return nil, fmt.Errorf("cannot create master playlist with zero variants")
-	}
-
-	if windowSize <= 0 {
-		return nil, fmt.Errorf("window size must be positive")
-	}
-
-	// Create one mediaPlaylist per variant
-	variantPlaylists := make([]*mediaPlaylist, len(variants))
-	for i, v := range variants {
-		if len(v.Segments) == 0 {
-			return nil, fmt.Errorf("variant %d has zero segments", i)
-		}
-
-		// Adjust window size if needed
-		effectiveWindowSize := windowSize
-		if windowSize > len(v.Segments) {
-			effectiveWindowSize = len(v.Segments)
-			logger.Warn("window size larger than variant segment count",
-				"variant", i,
-				"windowSize", windowSize,
-				"segmentCount", len(v.Segments),
-			)
-		}
-
-		// Create mediaPlaylist for this variant
-		mp := &mediaPlaylist{
-			segments:        v.Segments,
-			windowSize:      effectiveWindowSize,
-			currentPosition: 0,
-			sequenceNumber:  0,
-			targetDuration:  v.TargetDuration,
-			logger:          logger,
-		}
-		variantPlaylists[i] = mp
-	}
-
-	return &multiVariantPlaylist{
-		variants:         variants,
-		variantPlaylists: variantPlaylists,
-		logger:           logger,
-	}, nil
-}
-
-// NewClustered creates a cluster-aware media playlist.
-func NewClustered(segments []segment.Segment, windowSize, targetDuration int, clusterMgr *cluster.Manager, logger *slog.Logger) (Playlist, error) {
-	if len(segments) == 0 {
-		return nil, fmt.Errorf("cannot create playlist with zero segments")
-	}
-
-	if windowSize <= 0 {
-		return nil, fmt.Errorf("window size must be positive")
-	}
-
-	if windowSize > len(segments) {
-		windowSize = len(segments)
-		logger.Warn("window size larger than segment count, using all segments", "windowSize", windowSize)
-	}
-
-	// Create underlying media playlist
-	base := &mediaPlaylist{
-		segments:        segments,
-		windowSize:      windowSize,
-		currentPosition: 0,
-		sequenceNumber:  0,
-		targetDuration:  targetDuration,
-		logger:          logger,
-	}
-
-	// Initialize cluster state (only if this node is the leader)
-	if clusterMgr.IsLeader() {
-		initState := cluster.ClusterState{
-			CurrentPosition: 0,
-			SequenceNumber:  0,
-			TotalSegments:   len(segments),
-		}
-		if err := clusterMgr.Initialize(initState); err != nil {
-			return nil, fmt.Errorf("initialize cluster state: %w", err)
-		}
-		logger.Info("initialized cluster state", "total_segments", len(segments))
-	} else {
-		logger.Info("skipping cluster state initialization (not leader)")
-	}
-
-	return &clusteredPlaylist{
-		base:       base,
-		clusterMgr: clusterMgr,
-		logger:     logger,
-	}, nil
-}
-
-// NewMasterClustered creates a cluster-aware master playlist with multiple variants.
-func NewMasterClustered(variants []variant.Variant, windowSize int, clusterMgr *cluster.Manager, logger *slog.Logger) (Playlist, error) {
-	if len(variants) == 0 {
-		return nil, fmt.Errorf("cannot create master playlist with zero variants")
+		return nil, fmt.Errorf("cannot create playlist with zero variants")
 	}
 
 	if windowSize <= 0 {
@@ -198,7 +67,7 @@ func NewMasterClustered(variants []variant.Variant, windowSize int, clusterMgr *
 		}
 		variantPlaylists[i] = mp
 
-		// Initialize variant state
+		// Initialize variant state for cluster mode
 		variantStates[i] = cluster.VariantState{
 			Index:           i,
 			CurrentPosition: 0,
@@ -207,8 +76,8 @@ func NewMasterClustered(variants []variant.Variant, windowSize int, clusterMgr *
 		}
 	}
 
-	// Initialize cluster state with all variants (only if this node is the leader)
-	if clusterMgr.IsLeader() {
+	// Initialize cluster state if in cluster mode
+	if clusterMgr != nil && clusterMgr.IsLeader() {
 		initState := cluster.ClusterState{
 			Variants: variantStates,
 		}
@@ -216,24 +85,201 @@ func NewMasterClustered(variants []variant.Variant, windowSize int, clusterMgr *
 			return nil, fmt.Errorf("initialize cluster state: %w", err)
 		}
 		logger.Info("initialized cluster state", "variants", len(variantStates))
-	} else {
+	} else if clusterMgr != nil {
 		logger.Info("skipping cluster state initialization (not leader)")
 	}
 
-	base := &multiVariantPlaylist{
+	return &Playlist{
 		variants:         variants,
 		variantPlaylists: variantPlaylists,
+		clusterMgr:       clusterMgr,
 		logger:           logger,
-	}
-
-	return &clusteredMasterPlaylist{
-		base:       base,
-		clusterMgr: clusterMgr,
-		logger:     logger,
 	}, nil
 }
 
+// Generate creates an HLS master playlist with variant streams.
+func (p *Playlist) Generate() (string, error) {
+	var b strings.Builder
+
+	// HLS master playlist header
+	fmt.Fprintln(&b, "#EXTM3U")
+	fmt.Fprintln(&b, "#EXT-X-VERSION:3")
+
+	// Write variant streams
+	for i, v := range p.variants {
+		// Build #EXT-X-STREAM-INF attributes
+		fmt.Fprint(&b, "#EXT-X-STREAM-INF:")
+		fmt.Fprintf(&b, "BANDWIDTH=%d", v.Bandwidth)
+
+		if v.Resolution != "" {
+			fmt.Fprintf(&b, ",RESOLUTION=%s", v.Resolution)
+		}
+
+		if v.Codecs != "" {
+			fmt.Fprintf(&b, ",CODECS=\"%s\"", v.Codecs)
+		}
+
+		fmt.Fprintln(&b)
+
+		// Write variant playlist URL
+		fmt.Fprintf(&b, "/variant/%d/playlist.m3u8\n", i)
+	}
+
+	return b.String(), nil
+}
+
+// GenerateVariant creates an HLS media playlist for a specific variant.
+func (p *Playlist) GenerateVariant(variantIndex int) (string, error) {
+	if variantIndex < 0 || variantIndex >= len(p.variantPlaylists) {
+		return "", fmt.Errorf("variant index %d out of range (0-%d)", variantIndex, len(p.variantPlaylists)-1)
+	}
+
+	// If in cluster mode, sync state from cluster
+	if p.clusterMgr != nil {
+		state := p.clusterMgr.GetState()
+		if len(state.Variants) == 0 || variantIndex >= len(state.Variants) {
+			return "", fmt.Errorf("cluster state not initialized for variant %d", variantIndex)
+		}
+
+		// Update variant playlist with cluster state
+		mp := p.variantPlaylists[variantIndex]
+		mp.mu.Lock()
+		mp.currentPosition = state.Variants[variantIndex].CurrentPosition
+		mp.sequenceNumber = state.Variants[variantIndex].SequenceNumber
+		mp.mu.Unlock()
+	}
+
+	// Delegate to the variant's mediaPlaylist
+	return p.variantPlaylists[variantIndex].generate()
+}
+
+// Advance moves the sliding window forward by one segment for all variants.
+func (p *Playlist) Advance() {
+	// In cluster mode, only the leader advances
+	if p.clusterMgr != nil {
+		if !p.clusterMgr.IsLeader() {
+			return
+		}
+		if err := p.clusterMgr.AdvanceWindow(); err != nil {
+			p.logger.Error("failed to advance window", "error", err)
+		}
+		return
+	}
+
+	// Non-cluster mode: advance each variant independently
+	for i, mp := range p.variantPlaylists {
+		mp.advance()
+		if i == 0 {
+			// Only log for first variant to avoid spam
+			p.logger.Debug("advanced all variant windows",
+				"variants", len(p.variants),
+			)
+		}
+	}
+}
+
+// StartAutoAdvance starts a goroutine that automatically advances the window
+// based on the target duration.
+func (p *Playlist) StartAutoAdvance(ctx context.Context) {
+	// Use maximum target duration across all variants
+	maxTargetDuration := 0
+	for _, mp := range p.variantPlaylists {
+		if mp.targetDuration > maxTargetDuration {
+			maxTargetDuration = mp.targetDuration
+		}
+	}
+
+	interval := time.Duration(maxTargetDuration) * time.Second
+
+	if p.clusterMgr != nil {
+		p.logger.Info("starting cluster-aware auto-advance",
+			"interval", interval,
+			"variantCount", len(p.variants),
+		)
+	} else {
+		p.logger.Info("starting auto-advance for all variants",
+			"interval", interval,
+			"variantCount", len(p.variants),
+		)
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			p.logger.Info("stopping auto-advance")
+			return
+		case <-ticker.C:
+			p.Advance()
+		}
+	}
+}
+
+// GetStats returns current statistics about the playlist.
+// Includes per-variant statistics.
+func (p *Playlist) GetStats() map[string]any {
+	// Build per-variant stats from each mediaPlaylist
+	variantStats := make([]map[string]any, len(p.variants))
+	for i := range p.variants {
+		v := p.variants[i]
+		mp := p.variantPlaylists[i]
+
+		// Get stats from the mediaPlaylist
+		mpStats := mp.getStats()
+
+		variantStats[i] = map[string]any{
+			"index":          i,
+			"bandwidth":      v.Bandwidth,
+			"resolution":     v.Resolution,
+			"total_segments": mpStats["total_segments"],
+			"position":       mpStats["current_position"],
+		}
+	}
+
+	// Calculate aggregate stats
+	// Use max target duration across variants
+	maxTargetDuration := 0
+	for _, mp := range p.variantPlaylists {
+		if mp.targetDuration > maxTargetDuration {
+			maxTargetDuration = mp.targetDuration
+		}
+	}
+
+	stats := map[string]any{
+		"is_master":       true,
+		"window_size":     p.variantPlaylists[0].windowSize,
+		"sequence_number": p.variantPlaylists[0].sequenceNumber,
+		"target_duration": maxTargetDuration,
+		"variants":        variantStats,
+		"variant_count":   len(p.variants),
+	}
+
+	// Add cluster information if in cluster mode
+	if p.clusterMgr != nil {
+		state := p.clusterMgr.GetState()
+		stats["cluster_mode"] = true
+		stats["is_leader"] = p.clusterMgr.IsLeader()
+		stats["leader_address"] = p.clusterMgr.LeaderAddr()
+		stats["raft_state"] = p.clusterMgr.State()
+
+		// Update variant stats with cluster state
+		if len(state.Variants) > 0 {
+			for i := range variantStats {
+				if i < len(state.Variants) {
+					variantStats[i]["position"] = state.Variants[i].CurrentPosition
+					variantStats[i]["sequence_number"] = state.Variants[i].SequenceNumber
+				}
+			}
+		}
+	}
+
+	return stats
+}
+
 // mediaPlaylist manages a sliding window for a single media playlist.
+// This is a private helper type used internally by Playlist.
 type mediaPlaylist struct {
 	mu              sync.RWMutex
 	segments        []segment.Segment
@@ -244,8 +290,8 @@ type mediaPlaylist struct {
 	logger          *slog.Logger
 }
 
-// Generate creates an HLS media playlist for the current window.
-func (mp *mediaPlaylist) Generate() (string, error) {
+// generate creates an HLS media playlist for the current window.
+func (mp *mediaPlaylist) generate() (string, error) {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
@@ -278,13 +324,8 @@ func (mp *mediaPlaylist) Generate() (string, error) {
 	return b.String(), nil
 }
 
-// GenerateVariant returns an error because this is not a master playlist.
-func (mp *mediaPlaylist) GenerateVariant(variantIndex int) (string, error) {
-	return "", fmt.Errorf("not a master playlist")
-}
-
-// Advance moves the sliding window forward by one segment.
-func (mp *mediaPlaylist) Advance() {
+// advance moves the sliding window forward by one segment.
+func (mp *mediaPlaylist) advance() {
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
 
@@ -298,39 +339,12 @@ func (mp *mediaPlaylist) Advance() {
 	)
 }
 
-// StartAutoAdvance starts a goroutine that automatically advances the window
-// based on the target duration.
-func (mp *mediaPlaylist) StartAutoAdvance(ctx context.Context) {
-	// Use target duration as the advancement interval
-	interval := time.Duration(mp.targetDuration) * time.Second
-
-	mp.logger.Info("starting auto-advance",
-		"interval", interval,
-		"windowSize", mp.windowSize,
-		"totalSegments", len(mp.segments),
-	)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			mp.logger.Info("stopping auto-advance")
-			return
-		case <-ticker.C:
-			mp.Advance()
-		}
-	}
-}
-
-// GetStats returns current statistics about the playlist.
-func (mp *mediaPlaylist) GetStats() map[string]any {
+// getStats returns current statistics about the playlist.
+func (mp *mediaPlaylist) getStats() map[string]any {
 	mp.mu.RLock()
 	defer mp.mu.RUnlock()
 
 	return map[string]any{
-		"is_master":        false,
 		"window_size":      mp.windowSize,
 		"sequence_number":  mp.sequenceNumber,
 		"target_duration":  mp.targetDuration,
@@ -351,315 +365,4 @@ func (mp *mediaPlaylist) getCurrentWindow() []segment.Segment {
 	}
 
 	return window
-}
-
-// multiVariantPlaylist manages a sliding window for a multi-variant master playlist.
-// It generates both the master playlist (with variant links) and individual variant
-// media playlists.
-type multiVariantPlaylist struct {
-	variants         []variant.Variant // Metadata for master playlist generation
-	variantPlaylists []*mediaPlaylist  // One mediaPlaylist per variant
-	logger           *slog.Logger
-}
-
-// Generate creates an HLS master playlist with variant streams.
-func (mvp *multiVariantPlaylist) Generate() (string, error) {
-	var b strings.Builder
-
-	// HLS master playlist header
-	fmt.Fprintln(&b, "#EXTM3U")
-	fmt.Fprintln(&b, "#EXT-X-VERSION:3")
-
-	// Write variant streams
-	for i, v := range mvp.variants {
-		// Build #EXT-X-STREAM-INF attributes
-		fmt.Fprint(&b, "#EXT-X-STREAM-INF:")
-		fmt.Fprintf(&b, "BANDWIDTH=%d", v.Bandwidth)
-
-		if v.Resolution != "" {
-			fmt.Fprintf(&b, ",RESOLUTION=%s", v.Resolution)
-		}
-
-		if v.Codecs != "" {
-			fmt.Fprintf(&b, ",CODECS=\"%s\"", v.Codecs)
-		}
-
-		fmt.Fprintln(&b)
-
-		// Write variant playlist URL
-		fmt.Fprintf(&b, "/variant/%d/playlist.m3u8\n", i)
-	}
-
-	return b.String(), nil
-}
-
-// GenerateVariant creates an HLS media playlist for a specific variant.
-func (mvp *multiVariantPlaylist) GenerateVariant(variantIndex int) (string, error) {
-	if variantIndex < 0 || variantIndex >= len(mvp.variantPlaylists) {
-		return "", fmt.Errorf("variant index %d out of range (0-%d)", variantIndex, len(mvp.variantPlaylists)-1)
-	}
-
-	// Delegate to the variant's mediaPlaylist
-	return mvp.variantPlaylists[variantIndex].Generate()
-}
-
-// Advance moves the sliding window forward by one segment for all variants.
-func (mvp *multiVariantPlaylist) Advance() {
-	// Advance each variant independently
-	for i, mp := range mvp.variantPlaylists {
-		mp.Advance()
-		if i == 0 {
-			// Only log for first variant to avoid spam
-			mvp.logger.Debug("advanced all variant windows",
-				"variants", len(mvp.variants),
-			)
-		}
-	}
-}
-
-// StartAutoAdvance starts a goroutine that automatically advances the window
-// based on the target duration.
-// Each variant runs its own auto-advance goroutine independently.
-func (mvp *multiVariantPlaylist) StartAutoAdvance(ctx context.Context) {
-	mvp.logger.Info("starting auto-advance for all variants",
-		"variantCount", len(mvp.variants),
-	)
-
-	// Start auto-advance for each variant playlist
-	for _, mp := range mvp.variantPlaylists {
-		go mp.StartAutoAdvance(ctx)
-	}
-}
-
-// GetStats returns current statistics about the playlist.
-// Includes per-variant statistics.
-func (mvp *multiVariantPlaylist) GetStats() map[string]any {
-	// Build per-variant stats from each mediaPlaylist
-	variantStats := make([]map[string]any, len(mvp.variants))
-	for i := range mvp.variants {
-		v := mvp.variants[i]
-		mp := mvp.variantPlaylists[i]
-
-		// Get stats from the mediaPlaylist
-		mpStats := mp.GetStats()
-
-		variantStats[i] = map[string]any{
-			"index":          i,
-			"bandwidth":      v.Bandwidth,
-			"resolution":     v.Resolution,
-			"total_segments": mpStats["total_segments"],
-			"position":       mpStats["current_position"],
-		}
-	}
-
-	// Calculate aggregate stats
-	// Use max target duration across variants
-	maxTargetDuration := 0
-	for _, mp := range mvp.variantPlaylists {
-		stats := mp.GetStats()
-		if td := stats["target_duration"].(int); td > maxTargetDuration {
-			maxTargetDuration = td
-		}
-	}
-
-	return map[string]any{
-		"is_master":       true,
-		"window_size":     mvp.variantPlaylists[0].windowSize,
-		"sequence_number": mvp.variantPlaylists[0].sequenceNumber,
-		"target_duration": maxTargetDuration,
-		"variants":        variantStats,
-		"variant_count":   len(mvp.variants),
-	}
-}
-
-// clusteredPlaylist wraps a mediaPlaylist with cluster-aware state management.
-type clusteredPlaylist struct {
-	base       *mediaPlaylist
-	clusterMgr *cluster.Manager
-	logger     *slog.Logger
-}
-
-// Generate creates an HLS media playlist using cluster state.
-func (cp *clusteredPlaylist) Generate() (string, error) {
-	// Read current state from cluster
-	state := cp.clusterMgr.GetState()
-
-	// Update base playlist with cluster state
-	cp.base.mu.Lock()
-	cp.base.currentPosition = state.CurrentPosition
-	cp.base.sequenceNumber = state.SequenceNumber
-	cp.base.mu.Unlock()
-
-	// Delegate to base playlist
-	return cp.base.Generate()
-}
-
-// GenerateVariant returns an error because this is not a master playlist.
-func (cp *clusteredPlaylist) GenerateVariant(variantIndex int) (string, error) {
-	return "", fmt.Errorf("not a master playlist")
-}
-
-// Advance submits an advance command to the cluster (leader only).
-func (cp *clusteredPlaylist) Advance() {
-	if !cp.clusterMgr.IsLeader() {
-		return
-	}
-
-	if err := cp.clusterMgr.AdvanceWindow(); err != nil {
-		cp.logger.Error("failed to advance window", "error", err)
-	}
-}
-
-// StartAutoAdvance starts a goroutine that advances the window (leader only).
-func (cp *clusteredPlaylist) StartAutoAdvance(ctx context.Context) {
-	interval := time.Duration(cp.base.targetDuration) * time.Second
-
-	cp.logger.Info("starting cluster-aware auto-advance",
-		"interval", interval,
-		"windowSize", cp.base.windowSize,
-		"totalSegments", len(cp.base.segments),
-	)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			cp.logger.Info("stopping cluster-aware auto-advance")
-			return
-		case <-ticker.C:
-			// Only advance if this node is the leader
-			if cp.clusterMgr.IsLeader() {
-				if err := cp.clusterMgr.AdvanceWindow(); err != nil {
-					cp.logger.Error("failed to advance window", "error", err)
-				}
-			}
-		}
-	}
-}
-
-// GetStats returns current statistics from both cluster and base playlist.
-func (cp *clusteredPlaylist) GetStats() map[string]any {
-	stats := cp.base.GetStats()
-	state := cp.clusterMgr.GetState()
-
-	// Override with cluster state
-	stats["cluster_mode"] = true
-	stats["is_leader"] = cp.clusterMgr.IsLeader()
-	stats["leader_address"] = cp.clusterMgr.LeaderAddr()
-	stats["raft_state"] = cp.clusterMgr.State()
-	stats["current_position"] = state.CurrentPosition
-	stats["sequence_number"] = state.SequenceNumber
-
-	return stats
-}
-
-// clusteredMasterPlaylist wraps a multiVariantPlaylist with cluster-aware state management.
-type clusteredMasterPlaylist struct {
-	base       *multiVariantPlaylist
-	clusterMgr *cluster.Manager
-	logger     *slog.Logger
-}
-
-// Generate creates an HLS master playlist.
-func (cmp *clusteredMasterPlaylist) Generate() (string, error) {
-	// Master playlist doesn't need state synchronization
-	return cmp.base.Generate()
-}
-
-// GenerateVariant creates an HLS media playlist for a specific variant using cluster state.
-func (cmp *clusteredMasterPlaylist) GenerateVariant(variantIndex int) (string, error) {
-	if variantIndex < 0 || variantIndex >= len(cmp.base.variantPlaylists) {
-		return "", fmt.Errorf("variant index %d out of range (0-%d)", variantIndex, len(cmp.base.variantPlaylists)-1)
-	}
-
-	// Read current state from cluster
-	state := cmp.clusterMgr.GetState()
-
-	if len(state.Variants) == 0 || variantIndex >= len(state.Variants) {
-		return "", fmt.Errorf("cluster state not initialized for variant %d", variantIndex)
-	}
-
-	// Update variant playlist with cluster state
-	mp := cmp.base.variantPlaylists[variantIndex]
-	mp.mu.Lock()
-	mp.currentPosition = state.Variants[variantIndex].CurrentPosition
-	mp.sequenceNumber = state.Variants[variantIndex].SequenceNumber
-	mp.mu.Unlock()
-
-	// Delegate to base variant playlist
-	return mp.Generate()
-}
-
-// Advance submits an advance command to the cluster (leader only).
-func (cmp *clusteredMasterPlaylist) Advance() {
-	if !cmp.clusterMgr.IsLeader() {
-		return
-	}
-
-	if err := cmp.clusterMgr.AdvanceWindow(); err != nil {
-		cmp.logger.Error("failed to advance window", "error", err)
-	}
-}
-
-// StartAutoAdvance starts a goroutine that advances the window (leader only).
-func (cmp *clusteredMasterPlaylist) StartAutoAdvance(ctx context.Context) {
-	// Use maximum target duration across all variants
-	maxTargetDuration := 0
-	for _, mp := range cmp.base.variantPlaylists {
-		if mp.targetDuration > maxTargetDuration {
-			maxTargetDuration = mp.targetDuration
-		}
-	}
-
-	interval := time.Duration(maxTargetDuration) * time.Second
-
-	cmp.logger.Info("starting cluster-aware auto-advance for master playlist",
-		"interval", interval,
-		"variantCount", len(cmp.base.variants),
-	)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			cmp.logger.Info("stopping cluster-aware auto-advance for master playlist")
-			return
-		case <-ticker.C:
-			// Only advance if this node is the leader
-			if cmp.clusterMgr.IsLeader() {
-				if err := cmp.clusterMgr.AdvanceWindow(); err != nil {
-					cmp.logger.Error("failed to advance window", "error", err)
-				}
-			}
-		}
-	}
-}
-
-// GetStats returns current statistics from both cluster and base playlist.
-func (cmp *clusteredMasterPlaylist) GetStats() map[string]any {
-	stats := cmp.base.GetStats()
-	state := cmp.clusterMgr.GetState()
-
-	// Add cluster information
-	stats["cluster_mode"] = true
-	stats["is_leader"] = cmp.clusterMgr.IsLeader()
-	stats["leader_address"] = cmp.clusterMgr.LeaderAddr()
-	stats["raft_state"] = cmp.clusterMgr.State()
-
-	// Update variant stats with cluster state
-	if len(state.Variants) > 0 {
-		variantStats := stats["variants"].([]map[string]any)
-		for i := range variantStats {
-			if i < len(state.Variants) {
-				variantStats[i]["position"] = state.Variants[i].CurrentPosition
-				variantStats[i]["sequence_number"] = state.Variants[i].SequenceNumber
-			}
-		}
-	}
-
-	return stats
 }

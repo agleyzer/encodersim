@@ -16,14 +16,14 @@ import (
 
 // Server serves the live HLS playlist.
 type Server struct {
-	playlist   playlist.Playlist
+	playlist   *playlist.Playlist
 	port       int
 	logger     *slog.Logger
 	httpServer *http.Server
 }
 
 // New creates a new HTTP server.
-func New(lp playlist.Playlist, port int, logger *slog.Logger) *Server {
+func New(lp *playlist.Playlist, port int, logger *slog.Logger) *Server {
 	return &Server{
 		playlist: lp,
 		port:     port,

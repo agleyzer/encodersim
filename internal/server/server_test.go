@@ -13,6 +13,7 @@ import (
 
 	"github.com/agleyzer/encodersim/internal/playlist"
 	"github.com/agleyzer/encodersim/internal/segment"
+	"github.com/agleyzer/encodersim/internal/variant"
 )
 
 func createTestLogger() *slog.Logger {
@@ -21,7 +22,7 @@ func createTestLogger() *slog.Logger {
 	}))
 }
 
-func createTestPlaylist(t *testing.T) playlist.Playlist {
+func createTestPlaylist(t *testing.T) *playlist.Playlist {
 	segments := []segment.Segment{
 		{URL: "https://example.com/seg1.ts", Duration: 10.0, Sequence: 0},
 		{URL: "https://example.com/seg2.ts", Duration: 10.0, Sequence: 1},
@@ -30,8 +31,18 @@ func createTestPlaylist(t *testing.T) playlist.Playlist {
 		{URL: "https://example.com/seg5.ts", Duration: 10.0, Sequence: 4},
 	}
 
+	// Wrap segments in a single variant
+	variants := []variant.Variant{
+		{
+			Bandwidth:      1000000,
+			Resolution:     "1280x720",
+			Segments:       segments,
+			TargetDuration: 10,
+		},
+	}
+
 	logger := createTestLogger()
-	lp, err := playlist.New(segments, 3, 10, logger)
+	lp, err := playlist.New(variants, 3, nil, logger)
 	if err != nil {
 		t.Fatalf("Failed to create test playlist: %v", err)
 	}
@@ -91,7 +102,7 @@ func TestHandlePlaylist(t *testing.T) {
 		t.Errorf("Expected CORS header '*', got '%s'", corsHeader)
 	}
 
-	// Check body contains HLS content
+	// Check body contains HLS content (master playlist)
 	body := w.Body.String()
 	if !strings.Contains(body, "#EXTM3U") {
 		t.Error("Response body missing #EXTM3U tag")
@@ -99,8 +110,39 @@ func TestHandlePlaylist(t *testing.T) {
 	if !strings.Contains(body, "#EXT-X-VERSION") {
 		t.Error("Response body missing #EXT-X-VERSION tag")
 	}
+	if !strings.Contains(body, "#EXT-X-STREAM-INF") {
+		t.Error("Response body missing #EXT-X-STREAM-INF tag")
+	}
+}
+
+func TestHandleVariantPlaylist(t *testing.T) {
+	lp := createTestPlaylist(t)
+	logger := createTestLogger()
+	srv := New(lp, 8080, logger)
+
+	req := httptest.NewRequest("GET", "/variant/0/playlist.m3u8", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleVariantPlaylist(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	// Check body contains HLS media playlist content
+	body := w.Body.String()
+	if !strings.Contains(body, "#EXTM3U") {
+		t.Error("Response body missing #EXTM3U tag")
+	}
 	if !strings.Contains(body, "#EXT-X-TARGETDURATION") {
 		t.Error("Response body missing #EXT-X-TARGETDURATION tag")
+	}
+	if !strings.Contains(body, "#EXTINF") {
+		t.Error("Response body missing #EXTINF tag")
 	}
 }
 
@@ -150,7 +192,7 @@ func TestHandleHealth(t *testing.T) {
 		t.Fatal("Stats is not a map")
 	}
 
-	expectedFields := []string{"total_segments", "window_size", "current_position", "sequence_number", "target_duration"}
+	expectedFields := []string{"variant_count", "window_size", "sequence_number", "target_duration", "is_master"}
 	for _, field := range expectedFields {
 		if _, ok := stats[field]; !ok {
 			t.Errorf("Stats missing field '%s'", field)
@@ -177,12 +219,7 @@ func TestHandleHealth_WithAdvancedPlaylist(t *testing.T) {
 
 	stats := health["stats"].(map[string]any)
 
-	// Check that position reflects advances
-	position := stats["current_position"].(float64)
-	if position != 2 {
-		t.Errorf("Expected current_position 2, got %v", position)
-	}
-
+	// Check that sequence reflects advances
 	sequence := stats["sequence_number"].(float64)
 	if sequence != 2 {
 		t.Errorf("Expected sequence_number 2, got %v", sequence)

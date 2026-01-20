@@ -29,9 +29,9 @@ func TestWrappingPlaylist(t *testing.T) {
 	// Start encodersim with window size of 3
 	harness.StartEncoderSim("test.m3u8", 3)
 
-	// Test Phase 1: Verify initial playlist
+	// Test Phase 1: Verify initial playlist (now always served as variant 0)
 	t.Log("Phase 1: Verifying initial playlist...")
-	playlist := harness.FetchPlaylist()
+	playlist := harness.FetchVariantPlaylist(0)
 	parsed := ParsePlaylist(playlist)
 
 	// Should have exactly 3 segments in window
@@ -84,7 +84,7 @@ func TestWrappingPlaylist(t *testing.T) {
 	var foundDiscontinuity bool
 
 	harness.WaitForCondition(func() bool {
-		playlist := harness.FetchPlaylist()
+		playlist := harness.FetchVariantPlaylist(0)
 		parsed := ParsePlaylist(playlist)
 
 		// Look for discontinuity tag
@@ -145,7 +145,7 @@ func TestWrappingPlaylist(t *testing.T) {
 	// Fetch several more times to ensure it keeps working
 	for i := 0; i < 3; i++ {
 		time.Sleep(1500 * time.Millisecond)
-		playlist := harness.FetchPlaylist()
+		playlist := harness.FetchVariantPlaylist(0)
 		parsed := ParsePlaylist(playlist)
 
 		if len(parsed.Segments) != 3 {
@@ -420,9 +420,9 @@ func TestLoopAfterFlag(t *testing.T) {
 	// This should limit to 3 segments (0, 1, 2 = 6 seconds, within 50% threshold of 5s)
 	harness.StartEncoderSimWithArgs("test.m3u8", 6, "--loop-after", "5s")
 
-	// Test Phase 1: Verify initial playlist uses subset
+	// Test Phase 1: Verify initial playlist uses subset (now served as variant 0)
 	t.Log("Phase 1: Verifying loop-after limits segments...")
-	playlist := harness.FetchPlaylist()
+	playlist := harness.FetchVariantPlaylist(0)
 	parsed := ParsePlaylist(playlist)
 
 	// Should not exceed ~7.5 seconds (5s + 50% = 7.5s)
@@ -456,7 +456,7 @@ func TestLoopAfterFlag(t *testing.T) {
 	var foundDiscontinuity bool
 
 	harness.WaitForCondition(func() bool {
-		playlist := harness.FetchPlaylist()
+		playlist := harness.FetchVariantPlaylist(0)
 		parsed := ParsePlaylist(playlist)
 
 		// Look for discontinuity tag
@@ -482,7 +482,7 @@ func TestLoopAfterFlag(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		time.Sleep(2500 * time.Millisecond)
-		playlist := harness.FetchPlaylist()
+		playlist := harness.FetchVariantPlaylist(0)
 		parsed := ParsePlaylist(playlist)
 
 		// Should always have 3 segments (our limit)

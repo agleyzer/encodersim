@@ -107,16 +107,15 @@ go mod verify
    - Calculates target duration if not specified in playlist
 
 3. **internal/playlist**: Live playlist generation with sliding window
-   - `LivePlaylist`: Thread-safe with sync.RWMutex
-   - Supports both media playlist mode and master playlist mode
-   - `Generate()`: Creates HLS m3u8 media playlist for current window
-   - `GenerateMaster()`: Creates HLS master playlist with variant links
+   - `Playlist`: Single unified struct for all playlist management (thread-safe with sync.RWMutex)
+   - All playlists are multi-variant; single media playlists are wrapped as single-variant
+   - `Generate()`: Creates HLS master playlist with variant links
    - `GenerateVariant(index)`: Creates media playlist for specific variant
-   - `Advance()`: Moves window forward (all variants synchronously in master mode)
+   - `Advance()`: Moves window forward (all variants synchronously)
    - `StartAutoAdvance()`: Goroutine that advances window based on target duration
-   - `GetStats()`: Returns current state (per-variant in master mode)
-   - **Discontinuity detection**: Automatically inserts `#EXT-X-DISCONTINUITY` tag when playlist loops back to start (per-variant in master mode)
-   - **Cluster support**: `NewClustered()` and `NewMasterClustered()` create cluster-aware playlists
+   - `GetStats()`: Returns current state (per-variant stats included)
+   - **Discontinuity detection**: Automatically inserts `#EXT-X-DISCONTINUITY` tag when playlist loops back to start (per-variant)
+   - **Cluster support**: Pass cluster.Manager to `New()` for cluster-aware playlists (nil for standalone mode)
 
 4. **internal/cluster**: Distributed state management (optional, cluster mode only)
    - `Manager`: Manages Raft cluster for state synchronization
@@ -162,13 +161,14 @@ go mod verify
 - **Multi-Variant Synchronization**: All variants advance together on a single global timer based on maximum target duration across variants
 
 ### Data Flow
-1. User provides static HLS playlist URL
+1. User provides static HLS playlist URL (master or media)
 2. Parser fetches and parses m3u8, resolves segment URLs
-3. LivePlaylist initialized with segments, window size, target duration
-4. HTTP server starts, auto-advance goroutine begins
-5. Clients request `/playlist.m3u8`, server generates current window
-6. Window advances automatically every `target_duration` seconds
-7. Loop continues infinitely until shutdown signal
+3. Media playlists are wrapped as single-variant for unified handling
+4. Playlist initialized with variants, window size (cluster manager optional)
+5. HTTP server starts, auto-advance goroutine begins
+6. Clients request `/playlist.m3u8` for master, `/variant/{N}/playlist.m3u8` for media
+7. Window advances automatically every `target_duration` seconds
+8. Loop continues infinitely until shutdown signal
 
 ## Critical Implementation Rules
 
@@ -239,9 +239,10 @@ curl http://localhost:8080/health
 
 ### Modifying sliding window behavior
 - Core logic: `internal/playlist/generator.go`
+- `Playlist` struct is the main type; `mediaPlaylist` is a private helper for per-variant state
 - Window calculation: `getCurrentWindow()` method uses modulo arithmetic
-- Discontinuity detection: `Generate()` method compares segment sequences
-- Advancement timing: `StartAutoAdvance()` uses target duration
+- Discontinuity detection: `generate()` method compares segment sequences
+- Advancement timing: `StartAutoAdvance()` uses max target duration across variants
 
 ### Using the loop-after feature
 - Location: `cmd/encodersim/main.go`

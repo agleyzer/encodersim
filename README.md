@@ -55,6 +55,14 @@ This starts a live HLS server on port 8080 with a 6-segment sliding window.
 encodersim --port 8080 --window-size 10 https://example.com/playlist.m3u8
 ```
 
+### URL Structure
+
+All playlists (both master and single media) are served with the same URL structure:
+- **Master Playlist**: `http://localhost:8080/playlist.m3u8`
+- **Variant Playlists**: `http://localhost:8080/variant/0/playlist.m3u8`, `/variant/1/playlist.m3u8`, etc.
+
+Single media playlists are automatically wrapped as a single variant (variant 0).
+
 ### Master Playlist Support
 
 EncoderSim supports multi-bitrate (master) playlists:
@@ -63,11 +71,7 @@ EncoderSim supports multi-bitrate (master) playlists:
 encodersim https://example.com/master.m3u8
 ```
 
-The tool auto-detects master playlists and serves:
-- **Master Playlist**: `http://localhost:8080/playlist.m3u8`
-- **Variant Playlists**: `http://localhost:8080/variant/0/playlist.m3u8`, `/variant/1/playlist.m3u8`, etc.
-
-Each variant maintains its own sliding window and advances independently based on its target duration. When variants have the same target duration, they naturally stay synchronized.
+The tool auto-detects master playlists and serves all variants. Each variant maintains its own sliding window and advances based on the maximum target duration across variants for synchronization.
 
 ### Limiting Content Duration
 
@@ -261,23 +265,7 @@ The `/health` endpoint returns JSON with current statistics:
 curl http://localhost:8080/health
 ```
 
-**Media Playlist Response:**
-
-```json
-{
-  "status": "ok",
-  "stats": {
-    "is_master": false,
-    "total_segments": 30,
-    "window_size": 6,
-    "current_position": 12,
-    "sequence_number": 42,
-    "target_duration": 10
-  }
-}
-```
-
-**Master Playlist Response** (includes per-variant details):
+**Response** (includes per-variant details):
 
 ```json
 {
@@ -295,28 +283,35 @@ curl http://localhost:8080/health
         "resolution": "640x360",
         "total_segments": 30,
         "position": 12
+      },
+      {
+        "index": 1,
+        "bandwidth": 2560000,
+        "resolution": "1280x720",
+        "total_segments": 30,
+        "position": 12
       }
     ]
   }
 }
 ```
 
-**Cluster Mode Response** (includes cluster information):
+**Cluster Mode Response** (adds cluster information):
 
 ```json
 {
   "status": "ok",
   "stats": {
-    "is_master": false,
+    "is_master": true,
     "cluster_mode": true,
     "is_leader": false,
     "leader_address": "10.0.0.1:9000",
     "raft_state": "Follower",
-    "total_segments": 30,
     "window_size": 6,
-    "current_position": 12,
     "sequence_number": 42,
-    "target_duration": 10
+    "target_duration": 10,
+    "variant_count": 1,
+    "variants": [...]
   }
 }
 ```

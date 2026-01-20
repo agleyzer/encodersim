@@ -30,288 +30,6 @@ func createTestLogger() *slog.Logger {
 	}))
 }
 
-func TestNew(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(10)
-
-	lp, err := New(segments, 6, 10, logger)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-
-	stats := lp.GetStats()
-	if stats["total_segments"].(int) != 10 {
-		t.Errorf("Expected 10 segments, got %d", stats["total_segments"])
-	}
-	if stats["window_size"].(int) != 6 {
-		t.Errorf("Expected window size 6, got %d", stats["window_size"])
-	}
-	if stats["target_duration"].(int) != 10 {
-		t.Errorf("Expected target duration 10, got %d", stats["target_duration"])
-	}
-	if stats["current_position"].(int) != 0 {
-		t.Errorf("Expected initial position 0, got %d", stats["current_position"])
-	}
-	if stats["sequence_number"].(uint64) != 0 {
-		t.Errorf("Expected initial sequence 0, got %d", stats["sequence_number"])
-	}
-	if stats["is_master"].(bool) != false {
-		t.Errorf("Expected is_master to be false")
-	}
-}
-
-func TestNew_EmptySegments(t *testing.T) {
-	logger := createTestLogger()
-	_, err := New([]segment.Segment{}, 6, 10, logger)
-	if err == nil {
-		t.Fatal("Expected error for empty segments, got nil")
-	}
-}
-
-func TestNew_InvalidWindowSize(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(10)
-	_, err := New(segments, 0, 10, logger)
-	if err == nil {
-		t.Fatal("Expected error for zero window size, got nil")
-	}
-}
-
-func TestNew_WindowLargerThanSegments(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(5)
-	lp, err := New(segments, 10, 10, logger)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
-	}
-	// Window size should be clamped to segment count
-	stats := lp.GetStats()
-	if stats["window_size"].(int) != 5 {
-		t.Errorf("Expected window size clamped to 5, got %d", stats["window_size"])
-	}
-}
-
-func TestGenerate(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(8)
-	lp, _ := New(segments, 3, 10, logger)
-
-	playlist, err := lp.Generate()
-	if err != nil {
-		t.Fatalf("Generate() returned error: %v", err)
-	}
-
-	// Check for required HLS tags
-	if !strings.Contains(playlist, "#EXTM3U") {
-		t.Error("Playlist missing #EXTM3U tag")
-	}
-	if !strings.Contains(playlist, "#EXT-X-VERSION:3") {
-		t.Error("Playlist missing #EXT-X-VERSION tag")
-	}
-	if !strings.Contains(playlist, "#EXT-X-TARGETDURATION:10") {
-		t.Error("Playlist missing #EXT-X-TARGETDURATION tag")
-	}
-	if !strings.Contains(playlist, "#EXT-X-MEDIA-SEQUENCE:0") {
-		t.Error("Playlist missing #EXT-X-MEDIA-SEQUENCE tag")
-	}
-
-	// Check that we have 3 segments (window size)
-	segmentCount := strings.Count(playlist, "#EXTINF:")
-	if segmentCount != 3 {
-		t.Errorf("Expected 3 segments in playlist, got %d", segmentCount)
-	}
-
-	// Should NOT have #EXT-X-ENDLIST (live stream)
-	if strings.Contains(playlist, "#EXT-X-ENDLIST") {
-		t.Error("Live playlist should not have #EXT-X-ENDLIST tag")
-	}
-}
-
-func TestAdvance(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(8)
-	lp, _ := New(segments, 3, 10, logger)
-
-	stats := lp.GetStats()
-	initialPos := stats["current_position"].(int)
-	initialSeq := stats["sequence_number"].(uint64)
-
-	lp.Advance()
-
-	stats = lp.GetStats()
-	if stats["current_position"].(int) != initialPos+1 {
-		t.Errorf("Expected position %d, got %d", initialPos+1, stats["current_position"])
-	}
-	if stats["sequence_number"].(uint64) != initialSeq+1 {
-		t.Errorf("Expected sequence %d, got %d", initialSeq+1, stats["sequence_number"])
-	}
-}
-
-func TestAdvance_Looping(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(5)
-	lp, _ := New(segments, 3, 10, logger)
-
-	// Advance to the end and beyond
-	for i := 0; i < 5; i++ {
-		lp.Advance()
-	}
-
-	// Position should wrap around to 0
-	stats := lp.GetStats()
-	if stats["current_position"].(int) != 0 {
-		t.Errorf("Expected position to loop to 0, got %d", stats["current_position"])
-	}
-
-	// Sequence should keep incrementing
-	if stats["sequence_number"].(uint64) != 5 {
-		t.Errorf("Expected sequence 5, got %d", stats["sequence_number"])
-	}
-}
-
-// TestGetCurrentWindow removed - getCurrentWindow() is now a private method.
-// This functionality is tested through the public Generate() method in other tests.
-
-// TestGetCurrentWindow_AfterAdvance removed - getCurrentWindow() is now a private method.
-// This functionality is tested through the public Generate() method in other tests.
-
-// TestGetCurrentWindow_Looping removed - getCurrentWindow() is now a private method.
-// This functionality is tested through the public Generate() method in TestGenerateWithDiscontinuity.
-
-func TestGenerate_DiscontinuityTag(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(5)
-	lp, _ := New(segments, 3, 10, logger)
-
-	// Advance to position where window will wrap
-	for i := 0; i < 4; i++ {
-		lp.Advance()
-	}
-
-	playlist, err := lp.Generate()
-	if err != nil {
-		t.Fatalf("Generate() returned error: %v", err)
-	}
-
-	// Should have discontinuity tag when looping
-	if !strings.Contains(playlist, "#EXT-X-DISCONTINUITY") {
-		t.Error("Expected discontinuity tag when playlist loops, not found")
-	}
-
-	// Count discontinuity tags - should have exactly 1
-	count := strings.Count(playlist, "#EXT-X-DISCONTINUITY")
-	if count != 1 {
-		t.Errorf("Expected 1 discontinuity tag, found %d", count)
-	}
-}
-
-func TestGenerate_NoDiscontinuityWhenNotLooping(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(10)
-	lp, _ := New(segments, 3, 10, logger)
-
-	// Don't advance, or advance only slightly
-	lp.Advance()
-
-	playlist, err := lp.Generate()
-	if err != nil {
-		t.Fatalf("Generate() returned error: %v", err)
-	}
-
-	// Should NOT have discontinuity tag when not looping
-	if strings.Contains(playlist, "#EXT-X-DISCONTINUITY") {
-		t.Error("Should not have discontinuity tag when not looping")
-	}
-}
-
-func TestStartAutoAdvance(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(10)
-	lp, _ := New(segments, 3, 1, logger) // Use 1 second interval for faster testing
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go lp.StartAutoAdvance(ctx)
-
-	// Wait for a couple advances
-	time.Sleep(2500 * time.Millisecond)
-
-	// Should have advanced at least twice
-	stats := lp.GetStats()
-	position := stats["current_position"].(int)
-	sequence := stats["sequence_number"].(uint64)
-
-	if position < 2 {
-		t.Errorf("Expected position >= 2 after 2.5 seconds, got %d", position)
-	}
-	if sequence < 2 {
-		t.Errorf("Expected sequence >= 2 after 2.5 seconds, got %d", sequence)
-	}
-
-	// Cancel context and ensure it stops
-	cancel()
-	time.Sleep(100 * time.Millisecond)
-}
-
-func TestGetStats(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(10)
-	lp, _ := New(segments, 6, 10, logger)
-
-	lp.Advance()
-	lp.Advance()
-
-	stats := lp.GetStats()
-
-	if stats["total_segments"] != 10 {
-		t.Errorf("Expected total_segments 10, got %v", stats["total_segments"])
-	}
-	if stats["window_size"] != 6 {
-		t.Errorf("Expected window_size 6, got %v", stats["window_size"])
-	}
-	if stats["current_position"] != 2 {
-		t.Errorf("Expected current_position 2, got %v", stats["current_position"])
-	}
-	if stats["sequence_number"] != uint64(2) {
-		t.Errorf("Expected sequence_number 2, got %v", stats["sequence_number"])
-	}
-	if stats["target_duration"] != 10 {
-		t.Errorf("Expected target_duration 10, got %v", stats["target_duration"])
-	}
-}
-
-func TestConcurrentAccess(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(20)
-	lp, _ := New(segments, 6, 10, logger)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Start auto-advance
-	go lp.StartAutoAdvance(ctx)
-
-	// Concurrently generate playlists while advancing
-	done := make(chan bool)
-	for i := 0; i < 10; i++ {
-		go func() {
-			for j := 0; j < 100; j++ {
-				_, _ = lp.Generate()
-				_ = lp.GetStats()
-			}
-			done <- true
-		}()
-	}
-
-	// Wait for all goroutines
-	for i := 0; i < 10; i++ {
-		<-done
-	}
-
-	cancel()
-}
-
 // Helper function to create test variants
 func createTestVariants(count int, segmentsPerVariant int) []variant.Variant {
 	variants := make([]variant.Variant, count)
@@ -337,11 +55,25 @@ func createTestVariants(count int, segmentsPerVariant int) []variant.Variant {
 	return variants
 }
 
-func TestNewMaster(t *testing.T) {
+// createSingleVariant wraps segments into a single variant for testing
+func createSingleVariant(segments []segment.Segment, targetDuration int) []variant.Variant {
+	return []variant.Variant{
+		{
+			Bandwidth:      1000000,
+			Resolution:     "1280x720",
+			Codecs:         "avc1.4d401f,mp4a.40.2",
+			PlaylistURL:    "https://example.com/playlist.m3u8",
+			Segments:       segments,
+			TargetDuration: targetDuration,
+		},
+	}
+}
+
+func TestNew(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(3, 10)
 
-	lp, err := NewMaster(variants, 6, logger)
+	lp, err := New(variants, 6, nil, logger)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -361,7 +93,7 @@ func TestNewMaster(t *testing.T) {
 	}
 	variantStats := stats["variants"].([]map[string]any)
 	if len(variantStats) != 3 {
-		t.Errorf("Expected 3 variant positions, got %d", len(variantStats))
+		t.Errorf("Expected 3 variant stats, got %d", len(variantStats))
 	}
 	// All positions should start at 0
 	for i, vs := range variantStats {
@@ -371,24 +103,38 @@ func TestNewMaster(t *testing.T) {
 	}
 }
 
-func TestNewMaster_EmptyVariants(t *testing.T) {
+func TestNew_EmptyVariants(t *testing.T) {
 	logger := createTestLogger()
-	_, err := NewMaster([]variant.Variant{}, 6, logger)
+	_, err := New([]variant.Variant{}, 6, nil, logger)
 	if err == nil {
 		t.Fatal("Expected error for empty variants, got nil")
 	}
 }
 
-func TestNewMaster_InvalidWindowSize(t *testing.T) {
+func TestNew_InvalidWindowSize(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(2, 10)
-	_, err := NewMaster(variants, 0, logger)
+	_, err := New(variants, 0, nil, logger)
 	if err == nil {
 		t.Fatal("Expected error for zero window size, got nil")
 	}
 }
 
-func TestNewMaster_MaxTargetDuration(t *testing.T) {
+func TestNew_WindowLargerThanSegments(t *testing.T) {
+	logger := createTestLogger()
+	variants := createTestVariants(1, 5)
+	lp, err := New(variants, 10, nil, logger)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	// Window size should be clamped to segment count
+	stats := lp.GetStats()
+	if stats["window_size"].(int) != 5 {
+		t.Errorf("Expected window size clamped to 5, got %d", stats["window_size"])
+	}
+}
+
+func TestNew_MaxTargetDuration(t *testing.T) {
 	logger := createTestLogger()
 	variants := []variant.Variant{
 		{
@@ -408,7 +154,7 @@ func TestNewMaster_MaxTargetDuration(t *testing.T) {
 		},
 	}
 
-	lp, err := NewMaster(variants, 3, logger)
+	lp, err := New(variants, 3, nil, logger)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -420,10 +166,10 @@ func TestNewMaster_MaxTargetDuration(t *testing.T) {
 	}
 }
 
-func TestGenerateMaster(t *testing.T) {
+func TestGenerate(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(2, 10)
-	lp, _ := NewMaster(variants, 6, logger)
+	lp, _ := New(variants, 6, nil, logger)
 
 	playlist, err := lp.Generate()
 	if err != nil {
@@ -466,7 +212,7 @@ func TestGenerateMaster(t *testing.T) {
 func TestGenerateVariant(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(2, 8)
-	lp, _ := NewMaster(variants, 3, logger)
+	lp, _ := New(variants, 3, nil, logger)
 
 	// Generate first variant
 	playlist, err := lp.GenerateVariant(0)
@@ -498,12 +244,17 @@ func TestGenerateVariant(t *testing.T) {
 	if !strings.Contains(playlist, "v0_seg") {
 		t.Error("Variant 0 playlist should contain variant 0 segments")
 	}
+
+	// Should NOT have #EXT-X-ENDLIST (live stream)
+	if strings.Contains(playlist, "#EXT-X-ENDLIST") {
+		t.Error("Live playlist should not have #EXT-X-ENDLIST tag")
+	}
 }
 
 func TestGenerateVariant_InvalidIndex(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(2, 8)
-	lp, _ := NewMaster(variants, 3, logger)
+	lp, _ := New(variants, 3, nil, logger)
 
 	// Try invalid indices
 	_, err := lp.GenerateVariant(-1)
@@ -517,22 +268,10 @@ func TestGenerateVariant_InvalidIndex(t *testing.T) {
 	}
 }
 
-func TestGenerateVariant_OnMediaPlaylist(t *testing.T) {
-	logger := createTestLogger()
-	segments := createTestSegments(8)
-	lp, _ := New(segments, 3, 10, logger)
-
-	// Should error when called on non-master playlist
-	_, err := lp.GenerateVariant(0)
-	if err == nil {
-		t.Fatal("Expected error when calling GenerateVariant on media playlist, got nil")
-	}
-}
-
-func TestAdvance_MultiVariant(t *testing.T) {
+func TestAdvance(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(3, 10)
-	lp, _ := NewMaster(variants, 3, logger)
+	lp, _ := New(variants, 3, nil, logger)
 
 	stats := lp.GetStats()
 	initialSeq := stats["sequence_number"].(uint64)
@@ -555,10 +294,10 @@ func TestAdvance_MultiVariant(t *testing.T) {
 	}
 }
 
-func TestAdvance_MultiVariant_Looping(t *testing.T) {
+func TestAdvance_Looping(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(2, 5)
-	lp, _ := NewMaster(variants, 3, logger)
+	lp, _ := New(variants, 3, nil, logger)
 
 	// Advance past the end
 	for i := 0; i < 5; i++ {
@@ -580,10 +319,10 @@ func TestAdvance_MultiVariant_Looping(t *testing.T) {
 	}
 }
 
-func TestGetStats_MultiVariant(t *testing.T) {
+func TestGetStats(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(3, 10)
-	lp, _ := NewMaster(variants, 6, logger)
+	lp, _ := New(variants, 6, nil, logger)
 
 	lp.Advance()
 	lp.Advance()
@@ -635,7 +374,7 @@ func TestGetStats_MultiVariant(t *testing.T) {
 func TestGenerateVariant_DiscontinuityTag(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(2, 5)
-	lp, _ := NewMaster(variants, 3, logger)
+	lp, _ := New(variants, 3, nil, logger)
 
 	// Advance to position where window will wrap
 	for i := 0; i < 4; i++ {
@@ -660,14 +399,14 @@ func TestGenerateVariant_DiscontinuityTag(t *testing.T) {
 	}
 }
 
-func TestStartAutoAdvance_MultiVariant(t *testing.T) {
+func TestStartAutoAdvance(t *testing.T) {
 	logger := createTestLogger()
 	// Create variants with 1 second target duration for faster testing
 	variants := createTestVariants(3, 10)
 	for i := range variants {
 		variants[i].TargetDuration = 1
 	}
-	lp, _ := NewMaster(variants, 3, logger)
+	lp, _ := New(variants, 3, nil, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -695,10 +434,10 @@ func TestStartAutoAdvance_MultiVariant(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
-func TestConcurrentAccess_MultiVariant(t *testing.T) {
+func TestConcurrentAccess(t *testing.T) {
 	logger := createTestLogger()
 	variants := createTestVariants(3, 20)
-	lp, _ := NewMaster(variants, 6, logger)
+	lp, _ := New(variants, 6, nil, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
